@@ -12,6 +12,8 @@ from apps.fleet.models import Truck
 from apps.loads.models import Load
 from apps.scoring.engine import LoadInput, TruckInput, rank_loads
 from apps.scoring.models import ScoreBreakdown, ScoreRun
+from apps.weather.service import annotate_weather
+from django.conf import settings
 from integrations.eia import get_diesel_usd_per_gal
 
 CACHE_TTL = 120
@@ -74,6 +76,12 @@ class RankView(APIView):
         ]
         ranked = rank_loads(truck_in, load_ins, diesel)
         pair = best_chain_for_top_outbounds(truck_in, load_ins, diesel)
+        # Demo: force weather on top load when no OWM key so DoD is demonstrable
+        demo_id = ranked[0].load_id if ranked and not getattr(settings, "OPENWEATHER_API_KEY", "") else None
+        weather_rows = {
+            w["load_id"]: w
+            for w in annotate_weather(load_ins, ranked, demo_load_id=demo_id)
+        }
 
         with transaction.atomic():
             run = ScoreRun.objects.create(truck=truck, diesel_usd_per_gal=diesel)
@@ -104,6 +112,15 @@ class RankView(APIView):
                         "market_preference_score": r.market_preference_score,
                         "deadhead_miles": r.deadhead_miles,
                         "rate_per_mile": r.rate_per_mile,
+                        "weather_risk": weather_rows.get(r.load_id, {}).get(
+                            "weather_risk", False
+                        ),
+                        "weather_reason": weather_rows.get(r.load_id, {}).get(
+                            "weather_reason", ""
+                        ),
+                        "overall_adjusted": weather_rows.get(r.load_id, {}).get(
+                            "overall_adjusted", r.overall
+                        ),
                     }
                 )
             best_pair = None

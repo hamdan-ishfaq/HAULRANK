@@ -178,6 +178,17 @@ export default function DispatchPage() {
         renderCell: (p) => <FactorChips row={p.row as RankResult} />,
       },
       {
+        field: "weather_risk",
+        headerName: "Risk",
+        width: 140,
+        renderCell: (p) =>
+          p.row.weather_risk ? (
+            <Chip size="small" color="error" label="weather risk" title={p.row.weather_reason} />
+          ) : (
+            "—"
+          ),
+      },
+      {
         field: "actions",
         headerName: "",
         width: 200,

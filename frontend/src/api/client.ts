@@ -63,6 +63,9 @@ export type RankResult = {
   market_preference_score: number;
   deadhead_miles: number;
   rate_per_mile: number;
+  weather_risk?: boolean;
+  weather_reason?: string;
+  overall_adjusted?: number;
 };
 
 export type RankResponse = {
