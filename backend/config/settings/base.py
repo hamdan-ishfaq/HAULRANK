@@ -128,6 +128,7 @@ OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="") or env("GROQ_API_KEY"
 OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="openai/gpt-4o-mini")
 GROQ_API_KEY = OPENROUTER_API_KEY  # legacy alias for older env files
 OPENWEATHER_API_KEY = env("OPENWEATHER_API_KEY", default="")
+WEATHER_DEMO = env.bool("WEATHER_DEMO", default=False)
 
 # Scoring defaults
 AVG_SPEED_MPH = 55.0

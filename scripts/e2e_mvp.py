@@ -65,13 +65,12 @@ def main():
     must(code in (200, 201) and rank.get("results") is not None, f"rank ({code})")
     must(len(rank["results"]) >= 1, "rank returns results")
     must("best_single" in rank, "best_single present")
-    must(any(r.get("weather_risk") for r in rank["results"]), "at least one weather_risk flag")
+    must("weather_risk" in rank["results"][0], "weather fields on rank rows")
     if pair := rank.get("best_pair"):
         must("outbound_id" in pair and "return_id" in pair, "best_pair shaped")
     else:
         print("NOTE: best_pair null for this truck (ok if no nearby returns)")
     score_run_id = rank["score_run_id"]
-    # pick a load that is not already accepted+
     code, existing = call("GET", "/api/assignments/", token=token)
     taken = {
         a["load"]
@@ -82,6 +81,31 @@ def main():
         (r["load_id"] for r in rank["results"] if r["load_id"] not in taken),
         None,
     )
+    if load_id is None:
+        # create a fresh load so assignment chain can still be verified on re-runs
+        from datetime import datetime, timedelta, timezone
+
+        start = datetime.now(timezone.utc)
+        code, created_load = call(
+            "POST",
+            "/api/loads/",
+            {
+                "origin_lat": 32.8,
+                "origin_lon": -96.8,
+                "dest_lat": 29.7,
+                "dest_lon": -95.3,
+                "dest_market": "TX",
+                "miles": 250,
+                "rate_usd": 900,
+                "equipment_type": "dry_van",
+                "pickup_window_start": start.isoformat(),
+                "pickup_window_end": (start + timedelta(hours=6)).isoformat(),
+                "est_transit_hours": 5,
+            },
+            token=token,
+        )
+        must(code == 201, f"create spare load ({code})")
+        load_id = created_load["id"]
     must(load_id is not None, "free load available to assign")
 
     # explain without GROQ key should 503 — still a valid guarded path

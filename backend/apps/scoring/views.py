@@ -76,8 +76,10 @@ class RankView(APIView):
         ]
         ranked = rank_loads(truck_in, load_ins, diesel)
         pair = best_chain_for_top_outbounds(truck_in, load_ins, diesel)
-        # Demo: force weather on top load when no OWM key so DoD is demonstrable
-        demo_id = ranked[0].load_id if ranked and not getattr(settings, "OPENWEATHER_API_KEY", "") else None
+        # Live weather via Open-Meteo (no key). Demo only if WEATHER_DEMO=1.
+        demo_id = None
+        if getattr(settings, "WEATHER_DEMO", False) and ranked:
+            demo_id = ranked[0].load_id
         weather_rows = {
             w["load_id"]: w
             for w in annotate_weather(load_ins, ranked, demo_load_id=demo_id)

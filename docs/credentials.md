@@ -1,24 +1,27 @@
 # Credentials & deployment
 
-## Required for full local “majesty”
+## REDIS_URL empty in `.env`?
 
-| Key | Used for | Free signup | Without it |
-|-----|----------|-------------|------------|
-| `OPENROUTER_API_KEY` | Explain + Copilot | https://openrouter.ai/keys | Explain/Copilot return 503 |
-| `OPENWEATHER_API_KEY` | Live weather risk | https://home.openweathermap.org/api_keys (Free) | Demo “severe” flag on top load still works |
-| `EIA_API_KEY` | Weekly US diesel $ | https://www.eia.gov/opendata/register.php | Fixed fallback $3.80/gal |
+**Normal.** With `docker compose`, Redis is set inside Compose as `redis://redis:6379/0` and overrides the empty local value. You do **not** need to paste a Redis URL for local Docker.
 
-Default LLM model: `openai/gpt-4o-mini` via OpenRouter (cheap, good at JSON). Override with `OPENROUTER_MODEL` if you want (e.g. `google/gemini-2.0-flash-001`).
+Without Docker, empty `REDIS_URL` → in-memory cache (fine for solo dev).
 
-## Do you need deployment?
+## Weather (no waiting on OpenWeather)
 
-**Yes for the Spotter application** — PRD Definition of Done requires a live URL. Local Docker is enough to develop/demo to yourself; the résumé/application needs a public link.
+HaulRank uses **[Open-Meteo](https://open-meteo.com/)** by default — free, no signup, no activation delay, no GitHub key scrape needed.
 
-Suggested $0 stack (after local works):
+Optional later:
+- `OPENWEATHER_API_KEY` — used only if Open-Meteo fails (keys can take hours to activate)
+- `WEATHER_DEMO=1` — force a severe chip on the top load for demos when skies are clear
 
-1. **Neon** — Postgres → `DATABASE_URL`
-2. **Upstash** — Redis → `REDIS_URL`
-3. **Railway or Render** — Django (`web`) + env vars from `.env.example`
-4. **Vercel** — `frontend/` with `VITE_API_BASE=https://your-api…`
+## Keys you already have / may add
 
-Not required for coding: Kubernetes, paid load-board APIs, ELD hardware.
+| Key | Status |
+|-----|--------|
+| `OPENROUTER_API_KEY` | Required for Explain + Copilot |
+| `EIA_API_KEY` | Optional; live diesel $. Without it → $3.80 fallback |
+| `OPENWEATHER_API_KEY` | Optional backup; Open-Meteo is primary |
+
+## Deploy (when ready for Spotter live URL)
+
+Neon Postgres + Upstash Redis + Railway/Render API + Vercel frontend. Not required to keep coding locally.
