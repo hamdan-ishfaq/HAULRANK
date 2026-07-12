@@ -141,6 +141,7 @@ CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
     default=["http://localhost:5173"],
 )
+CORS_EXPOSE_HEADERS = ["X-Request-ID"]
 
 EIA_API_KEY = env("EIA_API_KEY", default="")
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="") or env("GROQ_API_KEY", default="")

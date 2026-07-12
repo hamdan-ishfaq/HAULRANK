@@ -19,13 +19,17 @@ class RequestTraceMiddleware:
         started = time.perf_counter()
         response = self.get_response(request)
         elapsed_ms = (time.perf_counter() - started) * 1000
-        response["X-Request-ID"] = request_id
+        # Prefer .headers (Django 3.2+) so DRF/HttpResponse both keep the value.
+        try:
+            response.headers["X-Request-ID"] = request_id
+        except Exception:
+            response["X-Request-ID"] = request_id
         logger.info(
             "rid=%s method=%s path=%s status=%s ms=%.1f origin=%s",
             request_id,
             request.method,
             request.get_full_path(),
-            response.status_code,
+            getattr(response, "status_code", "?"),
             elapsed_ms,
             request.headers.get("Origin", "-"),
         )

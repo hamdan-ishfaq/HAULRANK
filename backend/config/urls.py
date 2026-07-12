@@ -4,7 +4,13 @@ from django.urls import include, path
 
 
 def health(_request):
-    return JsonResponse({"status": "ok"})
+    return JsonResponse(
+        {
+            "status": "ok",
+            "service": "haulrank-api",
+            "features": ["request_trace", "opaque_500"],
+        }
+    )
 
 
 urlpatterns = [
