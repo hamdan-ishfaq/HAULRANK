@@ -1,0 +1,14 @@
+---
+description: Industrial clean coding — only the code that is needed.
+alwaysApply: true
+---
+
+# Clean coding
+
+- Prefer a library that already solves it over a custom 60-line rewrite, if it is maintained and fits the free-tier stack.
+- Prefer 10 correct lines over 60 clever ones.
+- No unused files, dead imports, commented-out code, or speculative abstractions.
+- Name things for the domain (truck, load, score_run), not for patterns (BaseAbstractFactory).
+- Trust-boundary validation stays; decorative try/except and logging noise go.
+- Secrets only in env / host dashboards — never commit `.env` or API keys.
+- Match existing project style once code exists; until then: Django/DRF and React conventions as used in this repo.

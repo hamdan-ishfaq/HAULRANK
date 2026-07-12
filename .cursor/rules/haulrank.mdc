@@ -1,0 +1,14 @@
+---
+description: HaulRank domain invariants for Spotter-aligned scoring.
+alwaysApply: true
+---
+
+# HaulRank invariants
+
+1. The money-relevant score is pure Python in `apps/scoring/engine.py`. No LLM writes `overall` or factor scores.
+2. `hos_feasibility == 0` (or infeasible HOS) **excludes** the load from ranked results — never soft-rank it as top pick.
+3. AI (Groq) only: narrates stored breakdowns, parses copilot intent into filters, or narrates engine output. It never invents loads or rates.
+4. Backhaul/copilot/weather/fleet-opt reuse `score_load` — do not build a second scoring stack.
+5. Stack stays free-tier: Django/DRF, Postgres, Redis, EIA, Groq, OpenWeatherMap, Vite/React/MUI.
+6. Seed data is synthetic and labeled as such in the README.
+7. Commits use the human author's GitHub identity only — never an AI co-author trailer.

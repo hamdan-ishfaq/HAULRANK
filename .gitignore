@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+*.sqlite3
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+frontend/dist/
+*.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+*:Zone.Identifier
+Thumbs.db
+
+# Secrets / local
+.env.*
+!.env.example
+*.pem
+
+# Docker
+postgres_data/
+
+frontend/.env
+backend/db.sqlite3
