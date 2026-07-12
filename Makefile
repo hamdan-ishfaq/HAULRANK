@@ -1,13 +1,19 @@
-.PHONY: api frontend test up
+.PHONY: api frontend test up e2e down
 
 api:
-	cd backend && . .venv/bin/activate && python manage.py runserver 127.0.0.1:8000
+	cd backend && . .venv/bin/activate && python manage.py runserver 0.0.0.0:8000
 
 frontend:
-	cd frontend && npm run dev
+	cd frontend && npm run dev -- --host 0.0.0.0 --port 5173
 
 test:
 	cd backend && . .venv/bin/activate && pytest
 
 up:
-	docker compose up --build
+	docker compose up --build -d
+
+down:
+	docker compose down
+
+e2e:
+	python3 scripts/e2e_mvp.py http://127.0.0.1:8000

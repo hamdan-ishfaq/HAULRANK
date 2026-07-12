@@ -33,18 +33,33 @@ docs/        architecture, formula, API notes
 
 ## Local dev
 
+### Option A — Docker (recommended)
+
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
 
+Then open:
+- UI: http://localhost:5173/
 - API: http://localhost:8000/api/health/
-- UI: http://localhost:5173 (when frontend container/dev server is up)
+
+Login: `demo` / `demo-pass-123`
+
+### Option B — without Docker
 
 ```bash
-cd backend && python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pytest
+cp .env.example .env
+cd backend && source .venv/bin/activate   # or: uv venv && uv pip install -r requirements.txt
+python manage.py migrate && python manage.py seed_demo
+python manage.py runserver 0.0.0.0:8000
+# other terminal:
+cd frontend && npm install && npm run dev
+```
+
+### E2E smoke (against a running API)
+
+```bash
+python3 scripts/e2e_mvp.py http://127.0.0.1:8000
 ```
 
 ## Branches

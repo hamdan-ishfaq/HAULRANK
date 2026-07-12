@@ -37,10 +37,10 @@ class Command(BaseCommand):
             Carrier.objects.all().delete()
             User.objects.filter(username="demo").delete()
 
-        user, _ = User.objects.get_or_create(username="demo")
-        if not user.has_usable_password():
-            user.set_password("demo-pass-123")
-            user.save()
+        user, created = User.objects.get_or_create(username="demo")
+        user.set_password("demo-pass-123")
+        user.is_active = True
+        user.save()
 
         carrier, _ = Carrier.objects.get_or_create(
             owner=user, defaults={"name": "Demo Carrier"}
