@@ -12,3 +12,4 @@ sentry-sdk>=2.0
 pytest>=8.0
 pytest-django>=4.8
 scipy>=1.11
+celery>=5.4

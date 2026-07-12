@@ -19,6 +19,15 @@ class DriverSerializer(serializers.ModelSerializer):
             "inspection_pass_rate",
             "on_time_pct",
             "reliability_score",
+            "compliance_state",
+            "compliance_reason",
+            "compliance_checked_at",
+        )
+        read_only_fields = (
+            "compliance_state",
+            "compliance_reason",
+            "compliance_checked_at",
+            "reliability_score",
         )
 
     def get_reliability_score(self, obj):

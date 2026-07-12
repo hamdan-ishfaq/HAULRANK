@@ -175,6 +175,7 @@ class Command(BaseCommand):
             Driver.objects.filter(pk=dallas_truck.driver.pk).update(hos_hours_remaining=14.0)
 
         call_command("seed_rates")
+        call_command("poll_compliance")
         self.stdout.write(
             self.style.SUCCESS(
                 f"Seeded carrier={carrier.name} trucks={Truck.objects.filter(carrier=carrier).count()} "

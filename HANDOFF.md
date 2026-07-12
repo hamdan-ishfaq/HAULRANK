@@ -2,7 +2,7 @@
 
 **Status:** Feature-complete **locally**. Verified with unit + live E2E. **Public deploy URL is the only open DoD item** — next step after you approve this handoff.
 
-**Verified:** 2026-07-12 · **49** pytest cases · `scripts/e2e_full.py` PASS (with `WEATHER_DEMO=1` for weather chip)
+**Verified:** 2026-07-12 · pytest + `python3 scripts/e2e.py` (brutal + compliance)
 
 ---
 
@@ -14,7 +14,7 @@ HaulRank is a transparent load-scoring / dispatch-ranking app for small carriers
 |-------|----------------|
 | **MVP** | JWT auth, fleet CRUD, load board, deterministic rank + Redis cache, grounded top-3 explain, assignment state machine + history |
 | **Tier 2** | Backhaul trip-chain (`$/hr` net), NL copilot → same engine, weather risk (Open-Meteo; optional demo flag) |
-| **Tier 3** | Fleet Hungarian assignment, driver reliability gate, lane rate z-score flags, analytics summary |
+| **Tier 3** | Fleet Hungarian assignment, continuous compliance state machine (Sentinel-echo), lane rate z-score flags, analytics summary |
 
 **Invariant:** The LLM never invents scores — it only parses intent or narrates stored breakdowns.
 
@@ -49,7 +49,7 @@ Demo login: `demo` / `demo-pass-123`
 | Feature | Why (one line) | Status |
 |---------|----------------|--------|
 | Fleet optimize | One load per truck, globally max utility (Hungarian) | E2E + unit |
-| Reliability gate | Weak compliance drivers blocked from high-value loads | Unit + rank field |
+| Reliability / compliance | Weak drivers gated; polled `clear|watch|restricted|suspended` state machine | Unit + rank/assign gates · `docs/COMPLIANCE.md` |
 | Rate benchmark | Z-score vs seeded lane history flags below/above market | Unit + rank field |
 | Analytics summary | Post-dispatch KPIs without a charting dependency | E2E |
 
@@ -58,8 +58,8 @@ Demo login: `demo` / `demo-pass-123`
 ## 3. Verification commands (run these before deploy)
 
 ```bash
-# Unit / edge cases (49)
-cd backend && source .venv/bin/activate && pytest -q
+# Unit / edge cases
+cd backend && .venv/bin/python -m pytest -q
 
 # Frontend production build
 cd frontend && npm run build
@@ -67,19 +67,22 @@ cd frontend && npm run build
 # Live stack
 cd .. && docker compose up --build -d
 
-# Full API + UI E2E (weather chip needs demo flag if skies are calm)
-docker compose exec -T redis redis-cli FLUSHALL
-WEATHER_DEMO=1 docker compose up -d --force-recreate web
-# wait ~15s for health
-python3 scripts/e2e_full.py http://127.0.0.1:8000
-# restore calm default
-WEATHER_DEMO=0 docker compose up -d web
+# ONE system-health suite (brutal + compliance) — local
+python3 scripts/e2e.py http://127.0.0.1:8000 http://127.0.0.1:5173
 
-# Lighter smoke (optional)
-python3 scripts/e2e_mvp.py http://127.0.0.1:8000
+# ONE system-health suite — live
+python3 scripts/e2e.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
 ```
 
-**Latest live E2E covered:** health, auth rejection, demo login, unauth rank 401, fleet/loads shape, rank + cache &lt;1s, HOS filter, `best_pair` beats single (`net_usd_per_hour`), weather flag, explain grounded + idempotent, assignment transitions + history, 3 copilot styles with grounding, fleet optimize uniqueness, analytics keys, frontend HTML.
+**Latest system E2E covers:** health, CORS, auth/JWT abuse, DEBUG leak probes, fleet ACL, rank + cache + HOS, assignment races, explain grounding, adversarial copilot, fleet opt, analytics, frontend shell, continuous compliance.
+
+Backend verify (venv — no bare `python` on WSL):
+
+```bash
+cd backend && .venv/bin/python manage.py migrate
+.venv/bin/python manage.py poll_compliance -v2
+.venv/bin/python -m pytest apps/compliance/ -q
+```
 
 ---
 
@@ -108,6 +111,7 @@ Key paths:
 | Copilot | `backend/apps/copilot/` |
 | Fleet opt | `backend/apps/fleet_opt/engine.py` |
 | Reliability | `backend/apps/fleet/reliability.py` |
+| Continuous compliance | `backend/apps/compliance/` · `docs/COMPLIANCE.md` |
 | Rates | `backend/apps/rates/models.py` |
 | Weather | `backend/integrations/openweather.py` (Open-Meteo primary) |
 | LLM | `backend/integrations/llm_client.py` |
@@ -183,6 +187,8 @@ cd frontend && npm install && npm run dev
 | `/api/copilot/` | POST | yes | NL → filters → engine → narrate |
 | `/api/fleet/optimize/` | POST | yes | Multi-truck assignment |
 | `/api/analytics/summary/` | GET | yes | KPIs |
+| `/api/compliance/` | GET | yes | Fleet compliance snapshot |
+| `/api/compliance/poll/` | POST | yes | Run one poll cycle (own fleet) |
 
 Rank `best_pair.combined_score` is **net USD per hour** (not the 0–1 overall score). Field `metric: "net_usd_per_hour"` and `beats_best_single: true` when returned.
 
@@ -220,7 +226,7 @@ Checklist:
 2. Deploy API with **`DJANGO_SETTINGS_MODULE=config.settings.production`** (hard-codes `DEBUG = False`) **and** set `DJANGO_DEBUG=0` in Railway/Render env anyway. Do not rely on Compose defaults — Compose is local-only; the repo’s [`docker-compose.yml`](docker-compose.yml) already hardcodes `DJANGO_DEBUG: "0"` for local Docker so `.env`’s `DJANGO_DEBUG=1` cannot leak secrets.
 3. Strong `SECRET_KEY`, `ALLOWED_HOSTS`, `CORS` = Vercel origin, migrate + `seed_demo` on release.
 3. Deploy frontend with `VITE_API_BASE=https://<api-host>`.
-4. Smoke: `python3 scripts/e2e_full.py https://<api-host>` (skip frontend check or point it at Vercel).
+4. Smoke: `python3 scripts/e2e.py https://<api-host> https://<ui-host>`
 5. Paste live URL into README / application.
 
 ---

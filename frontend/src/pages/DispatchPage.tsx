@@ -34,6 +34,16 @@ const NEXT: Record<string, string | null> = {
   delivered: null,
 };
 
+const COMPLIANCE_CHIP: Record<
+  string,
+  { label: string; color: "success" | "warning" | "error" | "default" | "info" }
+> = {
+  clear: { label: "clear", color: "success" },
+  watch: { label: "watch", color: "info" },
+  restricted: { label: "restricted", color: "warning" },
+  suspended: { label: "suspended", color: "error" },
+};
+
 function FactorChips({ row }: { row: RankResult }) {
   const items = [
     { label: "rate", v: row.rate_per_mile_score, color: "success" as const },
@@ -277,7 +287,8 @@ export default function DispatchPage() {
                   <MenuItem key={t.id} value={t.id}>
                     #{t.id} {t.equipment_type} · HOS{" "}
                     {t.driver?.hos_hours_remaining ?? "?"}h · rel{" "}
-                    {((t.driver?.reliability_score ?? 0) * 100).toFixed(0)}% · (
+                    {((t.driver?.reliability_score ?? 0) * 100).toFixed(0)}% ·{" "}
+                    {t.driver?.compliance_state ?? "clear"} · (
                     {t.current_lat.toFixed(2)}, {t.current_lon.toFixed(2)})
                   </MenuItem>
                 ))}
@@ -297,9 +308,25 @@ export default function DispatchPage() {
             Optimize fleet
           </Button>
           {selected?.driver && (
-            <Typography color="text.secondary">
-              Preferred: {(selected.driver.preferred_markets || []).join(", ") || "—"}
-            </Typography>
+            <Stack direction="row" gap={1} alignItems="center">
+              <Chip
+                size="small"
+                label={
+                  COMPLIANCE_CHIP[selected.driver.compliance_state ?? "clear"]?.label ??
+                  "clear"
+                }
+                color={
+                  COMPLIANCE_CHIP[selected.driver.compliance_state ?? "clear"]?.color ??
+                  "default"
+                }
+              />
+              <Typography color="text.secondary" variant="body2">
+                Preferred: {(selected.driver.preferred_markets || []).join(", ") || "—"}
+                {selected.driver.compliance_reason
+                  ? ` · ${selected.driver.compliance_reason}`
+                  : ""}
+              </Typography>
+            </Stack>
           )}
         </Stack>
 

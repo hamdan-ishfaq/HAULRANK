@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.fleet.models import Truck
+from apps.fleet.reliability import eligible_for_high_value
 from apps.scoring.engine import LoadInput, TruckInput, is_feasible
 
 from .models import ACTIVE_STATUSES, Assignment
@@ -30,6 +31,30 @@ class AssignmentSerializer(serializers.ModelSerializer):
         if not hasattr(truck, "driver"):
             raise serializers.ValidationError({"truck": "Truck has no driver"})
         driver = truck.driver
+
+        state = driver.compliance_state or "clear"
+        if state == "suspended":
+            raise serializers.ValidationError(
+                {
+                    "truck": (
+                        "Driver compliance suspended — dispatch eligibility revoked"
+                        + (f" ({driver.compliance_reason})" if driver.compliance_reason else "")
+                    )
+                }
+            )
+
+        if state == "restricted" or not eligible_for_high_value(
+            driver.reliability_score, load.rate_usd
+        ):
+            if load.rate_usd >= 2000:
+                raise serializers.ValidationError(
+                    {
+                        "load": (
+                            "High-value load gated by compliance "
+                            f"(state={state}, reliability={driver.reliability_score})"
+                        )
+                    }
+                )
 
         truck_in = TruckInput(
             id=truck.id,

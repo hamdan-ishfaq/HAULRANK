@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Deprecated entry — redirects to the single system suite (`scripts/e2e.py`).
+"""Single entry point for HaulRank system health (brutal live E2E).
 
-Kept so older docs/commands still work.
+Usage:
+  python3 scripts/e2e.py
+  python3 scripts/e2e.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
 """
 
 from __future__ import annotations
@@ -11,9 +13,6 @@ import sys
 from pathlib import Path
 
 if __name__ == "__main__":
-    # Default local UI when only API host is passed (legacy e2e_full habit)
-    if len(sys.argv) == 2:
-        sys.argv.append("http://127.0.0.1:5173")
     brutal = Path(__file__).resolve().parent / "e2e_brutal.py"
     ns = runpy.run_path(str(brutal))
     raise SystemExit(ns["main"]())

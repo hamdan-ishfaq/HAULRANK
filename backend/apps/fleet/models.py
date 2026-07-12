@@ -41,6 +41,22 @@ class Driver(models.Model):
     hos_violations_90d = models.PositiveIntegerField(default=0)
     inspection_pass_rate = models.FloatField(default=0.95)
     on_time_pct = models.FloatField(default=0.90)
+    # Continuous compliance state machine (polled; eligibility only)
+    class ComplianceState(models.TextChoices):
+        CLEAR = "clear", "Clear"
+        WATCH = "watch", "Watch"
+        RESTRICTED = "restricted", "Restricted"
+        SUSPENDED = "suspended", "Suspended"
+
+    compliance_state = models.CharField(
+        max_length=16,
+        choices=ComplianceState.choices,
+        default=ComplianceState.CLEAR,
+        db_index=True,
+    )
+    compliance_reason = models.TextField(blank=True, default="")
+    compliance_checked_at = models.DateTimeField(null=True, blank=True)
+    compliance_history = models.JSONField(default=list, blank=True)
 
     def __str__(self) -> str:
         return f"driver@{self.truck_id}"

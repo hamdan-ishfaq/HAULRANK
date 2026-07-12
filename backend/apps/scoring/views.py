@@ -10,8 +10,9 @@ from rest_framework.views import APIView
 
 from apps.backhaul.engine import best_chain_for_top_outbounds, pair_beats_best_single
 from apps.backhaul.models import TripChain
+from apps.compliance.engine import CLEAR, SUSPENDED, WATCH
 from apps.fleet.models import Truck
-from apps.fleet.reliability import eligible_for_high_value, reliability_score
+from apps.fleet.reliability import eligible_for_high_value
 from apps.loads.models import Load
 from apps.rates.models import LaneRateHistory, benchmark
 from apps.scoring.engine import LoadInput, TruckInput, rank_loads
@@ -23,12 +24,19 @@ CACHE_TTL = 120
 logger = logging.getLogger(__name__)
 
 
-def _rank_fingerprint(truck_in: TruckInput, loads: list[LoadInput], diesel: float) -> str:
+def _rank_fingerprint(
+    truck_in: TruckInput,
+    loads: list[LoadInput],
+    diesel: float,
+    *,
+    compliance_state: str,
+) -> str:
     """Hash all fields that affect scoring/backhaul so rate edits bust the cache."""
     parts: list[str] = [
         f"t:{truck_in.id}:{truck_in.equipment_type}:{truck_in.lat:.5f}:{truck_in.lon:.5f}"
         f":{truck_in.mpg}:{truck_in.hos_hours_remaining}"
-        f":{','.join(truck_in.preferred_markets)}:{','.join(truck_in.no_go_markets)}",
+        f":{','.join(truck_in.preferred_markets)}:{','.join(truck_in.no_go_markets)}"
+        f":cs:{compliance_state}",
         f"d:{round(diesel, 4)}",
     ]
     for l in sorted(loads, key=lambda x: x.id):
@@ -74,9 +82,21 @@ class RankView(APIView):
         if not hasattr(truck, "driver"):
             return Response({"detail": "Truck has no driver"}, status=400)
 
+        driver = truck.driver
+        compliance_state = driver.compliance_state or CLEAR
+        if compliance_state == SUSPENDED:
+            return Response(
+                {
+                    "detail": "Driver compliance suspended — dispatch eligibility revoked",
+                    "compliance_state": SUSPENDED,
+                    "compliance_reason": driver.compliance_reason,
+                    "driver_reliability": driver.reliability_score,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         loads = list(Load.objects.all())
         diesel = get_diesel_usd_per_gal()
-        driver = truck.driver
         truck_in = TruckInput(
             id=truck.id,
             equipment_type=truck.equipment_type,
@@ -102,7 +122,9 @@ class RankView(APIView):
             )
             for l in loads
         ]
-        cache_key = f"rank:{truck.id}:{_rank_fingerprint(truck_in, load_ins, diesel)}"
+        cache_key = (
+            f"rank:{truck.id}:{_rank_fingerprint(truck_in, load_ins, diesel, compliance_state=compliance_state)}"
+        )
         cached = _cache_get(cache_key)
         if cached:
             return Response(cached)
@@ -122,11 +144,9 @@ class RankView(APIView):
             history_by_market.setdefault(row.dest_market, []).append(row.avg_rate_per_mile)
         load_by_id = {l.id: l for l in loads}
 
-        driver_rel = reliability_score(
-            driver.hos_violations_90d,
-            driver.inspection_pass_rate,
-            driver.on_time_pct,
-        )
+        driver_rel = driver.reliability_score
+        # State machine is source of truth after poll; score gate is defense-in-depth.
+        high_value_ok = compliance_state in (CLEAR, WATCH)
 
         with transaction.atomic():
             run = ScoreRun.objects.create(truck=truck, diesel_usd_per_gal=diesel)
@@ -138,7 +158,9 @@ class RankView(APIView):
                     history_by_market.get(load_obj.dest_market, []),
                 )
                 overall = r.overall + max(-0.05, min(0.05, bench["z_score"] * 0.02))
-                gated = not eligible_for_high_value(driver_rel, load_obj.rate_usd)
+                gated = not (
+                    high_value_ok and eligible_for_high_value(driver_rel, load_obj.rate_usd)
+                )
 
                 ScoreBreakdown.objects.create(
                     score_run=run,
@@ -172,6 +194,7 @@ class RankView(APIView):
                         "overall_adjusted": wx.get("overall_adjusted", overall),
                         "rate_benchmark": bench,
                         "compliance_gated": gated,
+                        "compliance_state": compliance_state,
                         "driver_reliability": driver_rel,
                     }
                 )
@@ -206,6 +229,7 @@ class RankView(APIView):
             "score_run_id": run.id,
             "truck_id": truck.id,
             "diesel_usd_per_gal": diesel,
+            "compliance_state": compliance_state,
             "results": results,
             "best_single": results[0] if results else None,
             "best_pair": best_pair,

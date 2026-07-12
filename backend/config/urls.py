@@ -8,7 +8,7 @@ def health(_request):
         {
             "status": "ok",
             "service": "haulrank-api",
-            "features": ["request_trace", "opaque_500"],
+            "features": ["request_trace", "opaque_500", "compliance_sentinel"],
         }
     )
 
@@ -25,4 +25,5 @@ urlpatterns = [
     path("api/", include("apps.assignments.urls")),
     path("api/", include("apps.fleet_opt.urls")),
     path("api/", include("apps.analytics.urls")),
+    path("api/", include("apps.compliance.urls")),
 ]

@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.fleet_opt",
     "apps.rates",
     "apps.analytics",
+    "apps.compliance",
     "seed",
 ]
 
@@ -153,3 +154,15 @@ WEATHER_DEMO = env.bool("WEATHER_DEMO", default=False)
 # Scoring defaults
 AVG_SPEED_MPH = 55.0
 FALLBACK_DIESEL_USD_PER_GAL = 3.80
+
+# Celery (optional — continuous compliance poll). Without a worker, use:
+#   python manage.py poll_compliance
+CELERY_BROKER_URL = _redis_url or env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
+CELERY_BEAT_SCHEDULE = {
+    "poll-compliance-every-15m": {
+        "task": "apps.compliance.tasks.poll_compliance",
+        "schedule": 900.0,  # seconds; crontab needs celery.schedules if preferred
+    },
+}

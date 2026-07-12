@@ -78,6 +78,9 @@ export type Driver = {
   inspection_pass_rate?: number;
   on_time_pct?: number;
   reliability_score?: number;
+  compliance_state?: "clear" | "watch" | "restricted" | "suspended";
+  compliance_reason?: string;
+  compliance_checked_at?: string | null;
 };
 
 export type Truck = {
@@ -111,6 +114,7 @@ export type RankResponse = {
   score_run_id: number;
   truck_id: number;
   diesel_usd_per_gal: number;
+  compliance_state?: string;
   results: RankResult[];
   best_single: RankResult | null;
   best_pair: {

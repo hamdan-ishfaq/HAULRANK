@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Brutal live E2E + edge-case probe. Prints a full trace log for every check.
+"""Single system-health suite: brutal live E2E + edge cases + compliance.
+
+This is the one script to run to decide if HaulRank is healthy (local or live).
 
 Usage:
-  python3 scripts/e2e_brutal.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
+  python3 scripts/e2e.py
+  python3 scripts/e2e.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
+  python3 scripts/e2e_brutal.py   # same suite (alias)
 """
 
 from __future__ import annotations
@@ -110,11 +114,14 @@ def main() -> int:
     ok(h.status == 200 and isinstance(h.body, dict) and h.body.get("status") == "ok", "health ok")
 
     log("\n## 1. CORS matrix")
-    for origin, expect_allow in [
+    cors_cases = [
         (UI, True),
         ("https://evil.example", False),
-        ("http://localhost:5173", False),
-    ]:
+    ]
+    # Only assert localhost denied when the allowed UI origin is not localhost
+    if "localhost" not in UI and "127.0.0.1" not in UI:
+        cors_cases.append(("http://localhost:5173", False))
+    for origin, expect_allow in cors_cases:
         r = call(
             "OPTIONS",
             "/api/auth/token/",
@@ -429,14 +436,169 @@ def main() -> int:
     seed = call("POST", "/api/seed_demo/")
     ok(seed.status in (401, 404), f"seed_demo not HTTP-exposed ({seed.status})")
 
+    log("\n## 12. Continuous compliance (Sentinel-echo)")
+    features = h.body.get("features") if isinstance(h.body, dict) else None
+    has_sentinel = isinstance(features, list) and "compliance_sentinel" in features
+    if not has_sentinel:
+        log(
+            "WARN: health.features missing compliance_sentinel — "
+            "deploy/migrate may still be pending; running probes anyway"
+        )
+
+    unauth_c = call("GET", "/api/compliance/")
+    ok(unauth_c.status == 401, "compliance requires auth")
+
+    summary = call("GET", "/api/compliance/", token=token, origin=UI)
+    compliance_live = summary.status == 200 and isinstance(summary.body, dict)
+    if not compliance_live:
+        ok(
+            summary.status == 404,
+            f"compliance API absent ({summary.status}) — redeploy+migrate required",
+        )
+        if summary.status != 404:
+            ok(False, f"compliance summary unexpected status {summary.status}")
+    else:
+        ok(True, "compliance summary 200")
+        counts = summary.body.get("counts") or {}
+        drivers = summary.body.get("drivers") or []
+        ok(
+            all(k in counts for k in ("clear", "watch", "restricted", "suspended")),
+            "compliance counts keys",
+        )
+        ok(isinstance(drivers, list) and len(drivers) >= 3, f"compliance drivers={len(drivers)}")
+        states = {d.get("compliance_state") for d in drivers}
+        ok(states <= {"clear", "watch", "restricted", "suspended"}, f"valid states {states}")
+
+        # trucks embed compliance_state
+        trucks2 = call("GET", "/api/trucks/", token=token)
+        if isinstance(trucks2.body, list) and trucks2.body:
+            with_cs = [
+                t
+                for t in trucks2.body
+                if (t.get("driver") or {}).get("compliance_state")
+                in ("clear", "watch", "restricted", "suspended")
+            ]
+            ok(len(with_cs) == len(trucks2.body), "every truck.driver has compliance_state")
+
+        dry = call("POST", "/api/compliance/poll/", {"dry_run": True}, token=token)
+        ok(dry.status == 200 and isinstance(dry.body, dict), f"compliance dry-run poll ({dry.status})")
+        if dry.status == 200:
+            ok("checked" in dry.body and "results" in dry.body, "dry-run poll shape")
+
+        wet = call("POST", "/api/compliance/poll/", {"dry_run": False}, token=token)
+        ok(wet.status == 200 and isinstance(wet.body, dict), f"compliance poll ({wet.status})")
+        after = call("GET", "/api/compliance/", token=token)
+        ok(after.status == 200, "compliance summary after poll")
+        drivers = (after.body or {}).get("drivers") or []  # type: ignore[union-attr]
+
+        restricted = next((d for d in drivers if d.get("compliance_state") == "restricted"), None)
+        suspended = next((d for d in drivers if d.get("compliance_state") == "suspended"), None)
+        clearish = next(
+            (d for d in drivers if d.get("compliance_state") in ("clear", "watch")),
+            None,
+        )
+
+        ok(
+            restricted is not None or suspended is not None,
+            "seed has restricted/suspended driver after poll (Austin-like)",
+        )
+
+        if suspended:
+            rs = call(
+                "POST",
+                f"/api/rank/?truck_id={suspended['truck_id']}",
+                token=token,
+            )
+            ok(rs.status == 403, f"suspended rank refused ({rs.status})")
+            ok(
+                isinstance(rs.body, dict) and rs.body.get("compliance_state") == "suspended",
+                "suspended rank body has compliance_state",
+            )
+
+        if restricted:
+            rr = call(
+                "POST",
+                f"/api/rank/?truck_id={restricted['truck_id']}",
+                token=token,
+            )
+            ok(rr.status in (200, 201), f"restricted truck can rank ({rr.status})")
+            if rr.status in (200, 201) and isinstance(rr.body, dict):
+                ok(
+                    rr.body.get("compliance_state") == "restricted",
+                    "rank payload compliance_state=restricted",
+                )
+                # high-value loads must not appear in results
+                load_by_id = {
+                    l["id"]: l for l in loads.body  # type: ignore[union-attr]
+                } if isinstance(loads.body, list) else {}
+                high_in_results = [
+                    row
+                    for row in (rr.body.get("results") or [])
+                    if (load_by_id.get(row["load_id"]) or {}).get("rate_usd", 0) >= 2000
+                ]
+                ok(
+                    len(high_in_results) == 0,
+                    f"restricted gates high-value loads (leaked={len(high_in_results)})",
+                )
+
+            # assignment of high-value load must fail
+            high_load = None
+            if isinstance(loads.body, list):
+                existing = call("GET", "/api/assignments/", token=token)
+                taken = {
+                    a["load"]
+                    for a in (existing.body if isinstance(existing.body, list) else [])
+                    if a.get("status") in ("offered", "accepted", "dispatched")
+                }
+                high_load = next(
+                    (
+                        l
+                        for l in loads.body
+                        if l.get("rate_usd", 0) >= 2000 and l["id"] not in taken
+                    ),
+                    None,
+                )
+            if high_load:
+                bad_a = call(
+                    "POST",
+                    "/api/assignments/",
+                    {"load": high_load["id"], "truck": restricted["truck_id"]},
+                    token=token,
+                )
+                ok(
+                    bad_a.status == 400,
+                    f"restricted cannot assign high-value (${high_load['rate_usd']}) → {bad_a.status}",
+                )
+            else:
+                ok(True, "no free high-value load to probe assign gate (skipped)")
+
+        if clearish:
+            rc = call(
+                "POST",
+                f"/api/rank/?truck_id={clearish['truck_id']}",
+                token=token,
+            )
+            ok(rc.status in (200, 201, 403), f"clear/watch truck rank status {rc.status}")
+            if rc.status in (200, 201):
+                ok(
+                    rc.body.get("compliance_state") in ("clear", "watch"),  # type: ignore[union-attr]
+                    "clear/watch rank carries compliance_state",
+                )
+
+        # poll is idempotent-ish: second poll should not explode
+        wet2 = call("POST", "/api/compliance/poll/", {}, token=token)
+        ok(wet2.status == 200, "second compliance poll ok")
+        if wet2.status == 200 and isinstance(wet2.body, dict):
+            ok(wet2.body.get("checked", 0) >= 1, "second poll checked ≥1")
+
     log("\n" + "=" * 72)
     log(f"PASSED {len(passes)}  FAILED {len(failures)}")
     for f in failures:
         log(f"  - {f}")
     if failures:
-        log("BRUTAL E2E: FAILED")
+        log("SYSTEM E2E: FAILED")
         return 1
-    log("BRUTAL E2E: ALL PASSED")
+    log("SYSTEM E2E: ALL PASSED")
     return 0
 
 

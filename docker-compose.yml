@@ -68,6 +68,51 @@ services:
     depends_on:
       - web
 
+  # Optional: continuous compliance poll (comment out on free-tier hosts)
+  worker:
+    profiles: ["celery"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A config worker -l info
+    env_file:
+      - .env
+    environment:
+      DJANGO_SECRET_KEY: docker-dev-haulrank-secret-key-32b
+      DJANGO_DEBUG: "0"
+      DATABASE_URL: postgres://haulrank:haulrank@db:5432/haulrank
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.local
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    profiles: ["celery"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A config beat -l info
+    env_file:
+      - .env
+    environment:
+      DJANGO_SECRET_KEY: docker-dev-haulrank-secret-key-32b
+      DJANGO_DEBUG: "0"
+      DATABASE_URL: postgres://haulrank:haulrank@db:5432/haulrank
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.local
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   frontend_node_modules:
