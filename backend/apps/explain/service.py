@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from apps.scoring.models import ScoreBreakdown, ScoreRun
-from integrations import groq_client
+from integrations import llm_client
 
 SYSTEM = (
     "You explain trucking load scores. Use ONLY the JSON numbers given. "
@@ -32,7 +32,7 @@ def explain_top_n(score_run: ScoreRun, n: int = 3) -> list[ScoreBreakdown]:
             "miles": row.load.miles,
             "rate_usd": row.load.rate_usd,
         }
-        text = groq_client.complete(SYSTEM, json.dumps(payload))
+        text = llm_client.complete(SYSTEM, json.dumps(payload))
         row.explanation_text = text
         row.save(update_fields=["explanation_text"])
     return rows

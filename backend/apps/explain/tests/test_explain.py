@@ -90,7 +90,7 @@ def test_explain_top3_only_and_grounded(api, ranked):
         assert "0.85" in user_msg or "overall" in user_msg
         return f"Grounded explanation citing overall from payload."
 
-    with patch("apps.explain.service.groq_client.complete", side_effect=fake_complete):
+    with patch("apps.explain.service.llm_client.complete", side_effect=fake_complete):
         res = api.post(f"/api/rank/{run.id}/explain/")
     assert res.status_code == 200, res.data
     assert len(res.data["explanations"]) == 3
@@ -101,7 +101,7 @@ def test_explain_top3_only_and_grounded(api, ranked):
     assert ScoreBreakdown.objects.get(score_run=run, rank=4).explanation_text == ""
 
     # idempotent — second call does not re-bill
-    with patch("apps.explain.service.groq_client.complete", side_effect=fake_complete) as m:
+    with patch("apps.explain.service.llm_client.complete", side_effect=fake_complete) as m:
         res2 = api.post(f"/api/rank/{run.id}/explain/")
     assert res2.status_code == 200
     assert m.call_count == 0
@@ -117,8 +117,8 @@ def test_explain_missing_key_503(api, ranked):
     )
     api.credentials(HTTP_AUTHORIZATION=f"Bearer {token.data['access']}")
     with patch(
-        "apps.explain.service.groq_client.complete",
-        side_effect=RuntimeError("GROQ_API_KEY not set"),
+        "apps.explain.service.llm_client.complete",
+        side_effect=RuntimeError("OPENROUTER_API_KEY not set"),
     ):
         # clear texts so it tries
         ScoreBreakdown.objects.filter(score_run=run).update(explanation_text="")

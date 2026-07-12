@@ -124,7 +124,9 @@ CORS_ALLOWED_ORIGINS = env.list(
 )
 
 EIA_API_KEY = env("EIA_API_KEY", default="")
-GROQ_API_KEY = env("GROQ_API_KEY", default="")
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="") or env("GROQ_API_KEY", default="")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="openai/gpt-4o-mini")
+GROQ_API_KEY = OPENROUTER_API_KEY  # legacy alias for older env files
 OPENWEATHER_API_KEY = env("OPENWEATHER_API_KEY", default="")
 
 # Scoring defaults

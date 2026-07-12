@@ -80,7 +80,7 @@ def test_apply_filters_dest_and_equipment():
 
 def test_parse_rejects_unknown_keys():
     with patch(
-        "apps.copilot.service.groq_client.complete",
+        "apps.copilot.service.llm_client.complete",
         return_value='{"dest_region":"TX","hack":true}',
     ):
         try:
@@ -112,7 +112,7 @@ def test_copilot_three_query_styles_grounded(api, setup):
                 return _pj
             return f"Narration for style {_i} using only handed loads."
 
-        with patch("apps.copilot.service.groq_client.complete", side_effect=complete):
+        with patch("apps.copilot.service.llm_client.complete", side_effect=complete):
             res = api.post(
                 "/api/copilot/",
                 {"message": msg, "truck_id": truck.id},

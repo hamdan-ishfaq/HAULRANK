@@ -9,7 +9,7 @@ from typing import Any
 
 from apps.backhaul.engine import best_chain_for_top_outbounds
 from apps.scoring.engine import LoadInput, TruckInput, rank_loads
-from integrations import groq_client
+from integrations import llm_client
 
 FILTER_KEYS = {"dest_region", "deadline", "min_net", "equipment", "prefer_backhaul"}
 
@@ -27,7 +27,7 @@ NARRATE_SYSTEM = (
 
 
 def parse_filters(message: str) -> dict[str, Any]:
-    raw = groq_client.complete(PARSE_SYSTEM, message)
+    raw = llm_client.complete(PARSE_SYSTEM, message)
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError("Could not parse filters")
@@ -94,7 +94,7 @@ def run_copilot(
             else None
         ),
     }
-    narration = groq_client.complete(NARRATE_SYSTEM, json.dumps(engine_payload))
+    narration = llm_client.complete(NARRATE_SYSTEM, json.dumps(engine_payload))
     # Grounding: every load_id mentioned must exist in engine output
     allowed = {r.load_id for r in ranked}
     if pair:
