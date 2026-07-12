@@ -108,7 +108,7 @@ def test_explain_top3_only_and_grounded(api, ranked):
 
 
 @pytest.mark.django_db
-def test_explain_missing_key_503(api, ranked):
+def test_explain_llm_failure_uses_grounded_fallback(api, ranked):
     user, run = ranked
     token = api.post(
         "/api/auth/token/",
@@ -120,7 +120,10 @@ def test_explain_missing_key_503(api, ranked):
         "apps.explain.service.llm_client.complete",
         side_effect=RuntimeError("OPENROUTER_API_KEY not set"),
     ):
-        # clear texts so it tries
         ScoreBreakdown.objects.filter(score_run=run).update(explanation_text="")
         res = api.post(f"/api/rank/{run.id}/explain/")
-    assert res.status_code == 503
+    assert res.status_code == 200, res.data
+    assert len(res.data["explanations"]) == 3
+    text = res.data["explanations"][0]["explanation_text"]
+    assert "overall" in text.lower() or "Rank #" in text
+    assert str(res.data["explanations"][0]["overall"]) in text or "0." in text

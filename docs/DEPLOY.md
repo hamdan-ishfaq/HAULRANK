@@ -35,7 +35,7 @@ WEATHER_DEMO=0
 ## Render start command
 
 ```sh
-sh -c "python manage.py migrate --noinput && python manage.py seed_demo && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT"
+sh -c "python manage.py migrate --noinput && python manage.py seed_demo && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --timeout 60 --workers 2"
 ```
 
 ## Vercel

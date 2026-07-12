@@ -28,7 +28,7 @@ def complete(system: str, user: str) -> str:
             {"role": "user", "content": user},
         ],
     }
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=12.0) as client:
         resp = client.post(
             OPENROUTER_URL,
             headers={
