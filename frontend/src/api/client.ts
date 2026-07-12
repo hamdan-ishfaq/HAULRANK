@@ -2,6 +2,20 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 type Tokens = { access: string; refresh: string };
 
+class ApiError extends Error {
+  status: number;
+  body: string;
+  requestId: string;
+
+  constructor(status: number, body: string, requestId = "") {
+    super(status ? `${status} ${body}` : body);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+    this.requestId = requestId;
+  }
+}
+
 function authHeaders(): HeadersInit {
   const access = localStorage.getItem("access");
   return access
@@ -10,13 +24,32 @@ function authHeaders(): HeadersInit {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { ...authHeaders(), ...init?.headers },
-  });
+  const url = `${API_BASE}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: { ...authHeaders(), ...init?.headers },
+    });
+  } catch (err) {
+    const msg =
+      err instanceof Error ? err.message : "Network request failed";
+    console.error("[HaulRank API] network failure", { url, API_BASE, err });
+    throw new ApiError(
+      0,
+      `Cannot reach API at ${API_BASE} (${msg}). Check VITE_API_BASE and CORS.`,
+    );
+  }
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status} ${body}`);
+    const requestId = res.headers.get("X-Request-ID") || "";
+    console.error("[HaulRank API] error response", {
+      url,
+      status: res.status,
+      body,
+      requestId,
+    });
+    throw new ApiError(res.status, body, requestId);
   }
   return res.json();
 }
@@ -149,4 +182,4 @@ export const api = {
     }>("/api/analytics/summary/"),
 };
 
-export { API_BASE };
+export { API_BASE, ApiError };

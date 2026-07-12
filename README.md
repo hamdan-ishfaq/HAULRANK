@@ -70,7 +70,7 @@ python3 scripts/e2e_mvp.py http://127.0.0.1:8000
 
 Unit tests: `cd backend && pytest -q` (49 cases).
 
-Pre-deploy handoff: [HANDOFF.md](HANDOFF.md). Free-tier deploy steps: [docs/DEPLOY.md](docs/DEPLOY.md).
+Pre-deploy handoff: [HANDOFF.md](HANDOFF.md). Free-tier deploy: [docs/DEPLOY.md](docs/DEPLOY.md). Tracing: [docs/TRACING.md](docs/TRACING.md).
 
 ## Branches
 
