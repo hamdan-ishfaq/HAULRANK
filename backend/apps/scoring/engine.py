@@ -34,6 +34,8 @@ class LoadInput:
     id: int
     origin_lat: float
     origin_lon: float
+    dest_lat: float
+    dest_lon: float
     dest_market: str
     miles: float
     rate_usd: float

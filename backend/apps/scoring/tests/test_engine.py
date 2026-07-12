@@ -23,6 +23,8 @@ def _load(id_, **kwargs):
         id=id_,
         origin_lat=32.7767,
         origin_lon=-96.7970,
+        dest_lat=29.7604,
+        dest_lon=-95.3698,
         dest_market="TX",
         miles=200.0,
         rate_usd=600.0,

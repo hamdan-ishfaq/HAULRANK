@@ -239,6 +239,18 @@ export default function DispatchPage() {
         )}
         {busy && <LinearProgress sx={{ mb: 2 }} />}
 
+        {rank?.best_pair && (
+          <Box mb={2} p={2} bgcolor="#e8f0ec" borderRadius={1}>
+            <Typography variant="subtitle1">Best round-trip</Typography>
+            <Typography variant="body2">
+              Outbound load #{rank.best_pair.outbound_id} + return #{rank.best_pair.return_id} ·
+              combined ${rank.best_pair.combined_score.toFixed(2)}/hr · deadhead{" "}
+              {rank.best_pair.total_deadhead_miles.toFixed(0)} mi · revenue $
+              {rank.best_pair.total_rate_usd.toFixed(0)}
+            </Typography>
+          </Box>
+        )}
+
         <Box height={420} mb={2}>
           <DataGrid
             rows={rank?.results ?? []}

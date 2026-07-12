@@ -6,6 +6,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.backhaul.engine import best_chain_for_top_outbounds
+from apps.backhaul.models import TripChain
 from apps.fleet.models import Truck
 from apps.loads.models import Load
 from apps.scoring.engine import LoadInput, TruckInput, rank_loads
@@ -60,6 +62,8 @@ class RankView(APIView):
                 id=l.id,
                 origin_lat=l.origin_lat,
                 origin_lon=l.origin_lon,
+                dest_lat=l.dest_lat,
+                dest_lon=l.dest_lon,
                 dest_market=l.dest_market,
                 miles=l.miles,
                 rate_usd=l.rate_usd,
@@ -69,6 +73,7 @@ class RankView(APIView):
             for l in loads
         ]
         ranked = rank_loads(truck_in, load_ins, diesel)
+        pair = best_chain_for_top_outbounds(truck_in, load_ins, diesel)
 
         with transaction.atomic():
             run = ScoreRun.objects.create(truck=truck, diesel_usd_per_gal=diesel)
@@ -101,6 +106,24 @@ class RankView(APIView):
                         "rate_per_mile": r.rate_per_mile,
                     }
                 )
+            best_pair = None
+            if pair:
+                TripChain.objects.create(
+                    outbound_id=pair.outbound_id,
+                    return_load_id=pair.return_id,
+                    combined_score=pair.combined_score,
+                    total_deadhead_miles=pair.total_deadhead_miles,
+                    total_hours=pair.total_hours,
+                    total_rate_usd=pair.total_rate_usd,
+                )
+                best_pair = {
+                    "outbound_id": pair.outbound_id,
+                    "return_id": pair.return_id,
+                    "combined_score": pair.combined_score,
+                    "total_deadhead_miles": pair.total_deadhead_miles,
+                    "total_hours": pair.total_hours,
+                    "total_rate_usd": pair.total_rate_usd,
+                }
 
         payload = {
             "score_run_id": run.id,
@@ -108,6 +131,7 @@ class RankView(APIView):
             "diesel_usd_per_gal": diesel,
             "results": results,
             "best_single": results[0] if results else None,
+            "best_pair": best_pair,
         }
         cache.set(cache_key, payload, CACHE_TTL)
         return Response(payload, status=status.HTTP_201_CREATED)

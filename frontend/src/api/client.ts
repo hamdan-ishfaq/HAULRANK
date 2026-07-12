@@ -71,6 +71,14 @@ export type RankResponse = {
   diesel_usd_per_gal: number;
   results: RankResult[];
   best_single: RankResult | null;
+  best_pair: {
+    outbound_id: number;
+    return_id: number;
+    combined_score: number;
+    total_deadhead_miles: number;
+    total_hours: number;
+    total_rate_usd: number;
+  } | null;
 };
 
 export type Assignment = {
