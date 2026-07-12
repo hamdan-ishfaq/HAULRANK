@@ -17,6 +17,7 @@ def test_demo_severe_flags_load():
     annotated = annotate_weather(loads, ranked, demo_load_id=1)
     by_id = {a["load_id"]: a for a in annotated}
     assert by_id[1]["weather_risk"] is True
+    assert by_id[1]["weather_status"] == "severe"
     assert by_id[1]["overall_adjusted"] < 0.9
 
 
@@ -25,10 +26,11 @@ def test_open_meteo_calm(monkeypatch):
     monkeypatch.setattr("integrations.openweather.cache.set", lambda *a, **k: None)
     monkeypatch.setattr(
         "integrations.openweather._from_open_meteo",
-        lambda lat, lon: WeatherRisk(False, "", 0.0),
+        lambda lat, lon: WeatherRisk(False, "", 0.0, "clear"),
     )
     risk = assess_route(32.7, -96.8, 29.7, -95.3)
     assert risk.active is False
+    assert risk.status == "clear"
 
 
 def test_open_meteo_severe(monkeypatch):
@@ -36,8 +38,19 @@ def test_open_meteo_severe(monkeypatch):
     monkeypatch.setattr("integrations.openweather.cache.set", lambda *a, **k: None)
     monkeypatch.setattr(
         "integrations.openweather._from_open_meteo",
-        lambda lat, lon: WeatherRisk(True, "Open-Meteo: WMO 95", 0.4),
+        lambda lat, lon: WeatherRisk(True, "Open-Meteo: WMO 95", 0.4, "severe"),
     )
     risk = assess_route(32.7, -96.8, 29.7, -95.3)
     assert risk.active is True
+    assert risk.status == "severe"
     assert "95" in risk.reason
+
+
+def test_providers_unavailable(monkeypatch):
+    monkeypatch.setattr("integrations.openweather.cache.get", lambda *a, **k: None)
+    monkeypatch.setattr("integrations.openweather.cache.set", lambda *a, **k: None)
+    monkeypatch.setattr("integrations.openweather._from_open_meteo", lambda *a, **k: None)
+    monkeypatch.setattr("integrations.openweather._from_openweather", lambda *a, **k: None)
+    risk = assess_route(32.7, -96.8, 29.7, -95.3)
+    assert risk.status == "unavailable"
+    assert risk.active is False

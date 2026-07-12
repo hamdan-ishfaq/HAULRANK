@@ -1,8 +1,9 @@
 from rest_framework import serializers
 
 from apps.fleet.models import Truck
+from apps.scoring.engine import LoadInput, TruckInput, is_feasible
 
-from .models import Assignment
+from .models import ACTIVE_STATUSES, Assignment
 
 
 class AssignmentSerializer(serializers.ModelSerializer):
@@ -19,17 +20,43 @@ class AssignmentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         load = attrs["load"]
-        # block second active assignment for same load once accepted+
-        taken = Assignment.objects.filter(
-            load=load,
-            status__in=[
-                Assignment.Status.ACCEPTED,
-                Assignment.Status.DISPATCHED,
-                Assignment.Status.DELIVERED,
-            ],
-        ).exists()
+        truck = attrs["truck"]
+
+        taken = Assignment.objects.filter(load=load, status__in=ACTIVE_STATUSES).exists()
         if taken:
             raise serializers.ValidationError({"load": "Load already assigned"})
+
+        truck = Truck.objects.select_related("driver").get(pk=truck.pk)
+        if not hasattr(truck, "driver"):
+            raise serializers.ValidationError({"truck": "Truck has no driver"})
+        driver = truck.driver
+
+        truck_in = TruckInput(
+            id=truck.id,
+            equipment_type=truck.equipment_type,
+            lat=truck.current_lat,
+            lon=truck.current_lon,
+            mpg=truck.mpg,
+            hos_hours_remaining=driver.hos_hours_remaining,
+            preferred_markets=list(driver.preferred_markets or []),
+            no_go_markets=list(driver.no_go_markets or []),
+        )
+        load_in = LoadInput(
+            id=load.id,
+            origin_lat=load.origin_lat,
+            origin_lon=load.origin_lon,
+            dest_lat=load.dest_lat,
+            dest_lon=load.dest_lon,
+            dest_market=load.dest_market,
+            miles=load.miles,
+            rate_usd=load.rate_usd,
+            equipment_type=load.equipment_type,
+            est_transit_hours=load.est_transit_hours,
+        )
+        if not is_feasible(truck_in, load_in):
+            raise serializers.ValidationError(
+                {"load": "Load is not HOS/equipment feasible for this truck"}
+            )
         return attrs
 
 

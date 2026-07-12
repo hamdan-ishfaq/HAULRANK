@@ -75,50 +75,54 @@ def test_token_and_trucks(api, user):
 
 @pytest.mark.django_db
 def test_loads_validation(api, user):
+    from django.utils import timezone
+    from datetime import timedelta
+
+    from apps.loads.serializers import LoadSerializer
+
+    start = timezone.now()
+    payload = {
+        "origin_lat": 32.0,
+        "origin_lon": -97.0,
+        "dest_lat": 29.7,
+        "dest_lon": -95.3,
+        "dest_market": "TX",
+        "miles": 0,
+        "rate_usd": 1000,
+        "equipment_type": "dry_van",
+        "pickup_window_start": start.isoformat(),
+        "pickup_window_end": (start + timedelta(hours=4)).isoformat(),
+        "est_transit_hours": 5,
+    }
+    ser = LoadSerializer(data=payload)
+    assert not ser.is_valid()
+    assert "miles" in ser.errors
+
     token = api.post(
         "/api/auth/token/",
         {"username": "disp", "password": "test-pass-123"},
         format="json",
     )
     api.credentials(HTTP_AUTHORIZATION=f"Bearer {token.data['access']}")
-    from django.utils import timezone
-    from datetime import timedelta
-
-    start = timezone.now()
-    bad = api.post(
+    # Non-staff cannot mutate synthetic board
+    denied = api.post(
         "/api/loads/",
-        {
-            "origin_lat": 32.0,
-            "origin_lon": -97.0,
-            "dest_lat": 29.7,
-            "dest_lon": -95.3,
-            "dest_market": "TX",
-            "miles": 0,
-            "rate_usd": 1000,
-            "equipment_type": "dry_van",
-            "pickup_window_start": start.isoformat(),
-            "pickup_window_end": (start + timedelta(hours=4)).isoformat(),
-            "est_transit_hours": 5,
-        },
+        {**payload, "miles": 250},
         format="json",
     )
-    assert bad.status_code == 400
+    assert denied.status_code == 403
 
+    user.is_staff = True
+    user.save()
+    token = api.post(
+        "/api/auth/token/",
+        {"username": "disp", "password": "test-pass-123"},
+        format="json",
+    )
+    api.credentials(HTTP_AUTHORIZATION=f"Bearer {token.data['access']}")
     ok = api.post(
         "/api/loads/",
-        {
-            "origin_lat": 32.0,
-            "origin_lon": -97.0,
-            "dest_lat": 29.7,
-            "dest_lon": -95.3,
-            "dest_market": "TX",
-            "miles": 250,
-            "rate_usd": 800,
-            "equipment_type": "dry_van",
-            "pickup_window_start": start.isoformat(),
-            "pickup_window_end": (start + timedelta(hours=4)).isoformat(),
-            "est_transit_hours": 5,
-        },
+        {**payload, "miles": 250, "rate_usd": 800},
         format="json",
     )
     assert ok.status_code == 201, ok.data

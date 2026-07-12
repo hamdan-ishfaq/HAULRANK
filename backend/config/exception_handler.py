@@ -1,0 +1,27 @@
+"""DRF exception handler — never leak settings/tracebacks when DEBUG is off."""
+
+from __future__ import annotations
+
+import logging
+
+from django.conf import settings
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import exception_handler as drf_exception_handler
+
+logger = logging.getLogger(__name__)
+
+
+def haulrank_exception_handler(exc, context):
+    response = drf_exception_handler(exc, context)
+    if response is not None:
+        return response
+
+    logger.exception("Unhandled API exception", exc_info=exc)
+    if settings.DEBUG:
+        # Let DRF/Django surface details in local DEBUG only
+        return None
+    return Response(
+        {"detail": "Internal server error"},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )

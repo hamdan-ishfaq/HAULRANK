@@ -10,20 +10,18 @@ from django.core.cache import cache
 
 CACHE_TTL = 60 * 60 * 3
 
-# WMO weather interpretation codes (Open-Meteo) that imply disruption
 SEVERE_WMO = {
     65,
-    67,  # heavy rain / freezing rain
+    67,
     75,
-    77,  # heavy snow / snow grains
+    77,
     82,
-    86,  # heavy showers
+    86,
     95,
     96,
-    99,  # thunderstorm (+ hail)
+    99,
 }
 
-# OpenWeather condition ids (optional provider)
 SEVERE_OWM = {
     202,
     212,
@@ -50,6 +48,7 @@ class WeatherRisk:
     active: bool
     reason: str
     severity: float  # 0..1
+    status: str = "clear"  # clear | severe | unavailable
 
 
 def midpoint(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, float]:
@@ -75,9 +74,9 @@ def _from_open_meteo(lat: float, lon: float) -> WeatherRisk | None:
     wind = float(cur.get("wind_speed_10m") or 0)
     severe = code in SEVERE_WMO or wind >= 20
     if not severe:
-        return WeatherRisk(False, "", 0.0)
+        return WeatherRisk(False, "", 0.0, "clear")
     reason = f"Open-Meteo: WMO {code}" + (f", wind {wind:.0f} m/s" if wind >= 20 else "")
-    return WeatherRisk(True, reason, 0.4)
+    return WeatherRisk(True, reason, 0.4, "severe")
 
 
 def _from_openweather(lat: float, lon: float, key: str) -> WeatherRisk | None:
@@ -99,8 +98,8 @@ def _from_openweather(lat: float, lon: float, key: str) -> WeatherRisk | None:
     wind = float((data.get("wind") or {}).get("speed") or 0)
     severe = wid in SEVERE_OWM or wind >= 20
     if not severe:
-        return WeatherRisk(False, "", 0.0)
-    return WeatherRisk(True, f"Weather: {desc}", 0.4)
+        return WeatherRisk(False, "", 0.0, "clear")
+    return WeatherRisk(True, f"Weather: {desc}", 0.4, "severe")
 
 
 def assess_route(
@@ -112,12 +111,17 @@ def assess_route(
     force_severe: bool = False,
 ) -> WeatherRisk:
     if force_severe:
-        return WeatherRisk(True, "Demo: severe winter storm on corridor", 0.45)
+        return WeatherRisk(True, "Demo: severe winter storm on corridor", 0.45, "severe")
 
     lat, lon = midpoint(origin_lat, origin_lon, dest_lat, dest_lon)
     cache_key = f"wx:{lat:.2f}:{lon:.2f}"
     cached = cache.get(cache_key)
     if cached is not None:
+        if "status" not in cached:
+            cached = {
+                **cached,
+                "status": "severe" if cached.get("active") else "clear",
+            }
         return WeatherRisk(**cached)
 
     risk = _from_open_meteo(lat, lon)
@@ -125,12 +129,16 @@ def assess_route(
         key = getattr(settings, "OPENWEATHER_API_KEY", "") or ""
         risk = _from_openweather(lat, lon, key) if key else None
     if risk is None:
-        # fail open — no live weather available
-        return WeatherRisk(False, "", 0.0)
+        return WeatherRisk(False, "Weather providers unavailable", 0.0, "unavailable")
 
     cache.set(
         cache_key,
-        {"active": risk.active, "reason": risk.reason, "severity": risk.severity},
+        {
+            "active": risk.active,
+            "reason": risk.reason,
+            "severity": risk.severity,
+            "status": risk.status,
+        },
         CACHE_TTL,
     )
     return risk

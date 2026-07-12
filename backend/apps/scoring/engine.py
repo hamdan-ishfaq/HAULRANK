@@ -73,6 +73,22 @@ def _market_raw(load: LoadInput, truck: TruckInput) -> float:
     return 0.5
 
 
+def is_feasible(
+    truck: TruckInput,
+    load: LoadInput,
+    avg_speed_mph: float = AVG_SPEED_MPH,
+) -> bool:
+    """True if equipment matches and HOS covers deadhead + transit (equality allowed)."""
+    if load.miles <= 0 or load.rate_usd < 0:
+        return False
+    if load.equipment_type != truck.equipment_type:
+        return False
+    deadhead = haversine_miles(truck.lat, truck.lon, load.origin_lat, load.origin_lon)
+    deadhead_hours = deadhead / avg_speed_mph if avg_speed_mph > 0 else inf
+    # Product rule: exclude only when required hours *exceed* remaining (`>`).
+    return deadhead_hours + load.est_transit_hours <= truck.hos_hours_remaining
+
+
 def rank_loads(
     truck: TruckInput,
     loads: list[LoadInput],
@@ -84,13 +100,10 @@ def rank_loads(
     # tuple: load, rpm, deadhead_mi, net_after_fuel_per_mi, market_raw
 
     for load in loads:
-        if load.equipment_type != truck.equipment_type:
+        if not is_feasible(truck, load, avg_speed_mph):
             continue
         deadhead = haversine_miles(truck.lat, truck.lon, load.origin_lat, load.origin_lon)
-        deadhead_hours = deadhead / avg_speed_mph if avg_speed_mph > 0 else inf
-        if deadhead_hours + load.est_transit_hours > truck.hos_hours_remaining:
-            continue  # hard filter
-        rpm = load.rate_usd / load.miles if load.miles > 0 else 0.0
+        rpm = load.rate_usd / load.miles
         fuel_cost_per_mi = diesel_usd_per_gal / truck.mpg if truck.mpg > 0 else 0.0
         net_per_mi = rpm - fuel_cost_per_mi
         market = _market_raw(load, truck)

@@ -57,11 +57,20 @@ python manage.py runserver 0.0.0.0:8000
 cd frontend && npm install && npm run dev
 ```
 
-### E2E smoke (against a running API)
+### E2E (against a running API)
 
 ```bash
+# Full suite (auth, rank/cache, HOS, backhaul, explain, assignments, copilot, fleet, analytics, UI)
+WEATHER_DEMO=1 docker compose up -d --force-recreate web   # weather chip if skies calm
+python3 scripts/e2e_full.py http://127.0.0.1:8000
+
+# Lighter smoke
 python3 scripts/e2e_mvp.py http://127.0.0.1:8000
 ```
+
+Unit tests: `cd backend && pytest -q` (49 cases).
+
+Pre-deploy handoff: [HANDOFF.md](HANDOFF.md).
 
 ## Branches
 

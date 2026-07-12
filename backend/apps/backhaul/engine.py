@@ -88,6 +88,17 @@ def best_backhaul_pair(
     )
 
 
+def single_load_net_per_hour(
+    truck: TruckInput, load: LoadInput, diesel_usd_per_gal: float
+) -> float:
+    """Same $/hr metric used by trip pairs — for apples-to-apples DoD compare."""
+    deadhead = haversine_miles(truck.lat, truck.lon, load.origin_lat, load.origin_lon)
+    hours = deadhead / AVG_SPEED_MPH + load.est_transit_hours
+    if hours <= 0:
+        return 0.0
+    return _leg_net(load, deadhead, truck.mpg, diesel_usd_per_gal) / hours
+
+
 def best_chain_for_top_outbounds(
     truck: TruckInput,
     loads: list[LoadInput],
@@ -106,3 +117,19 @@ def best_chain_for_top_outbounds(
         if pair and (best is None or pair.combined_score > best.combined_score):
             best = pair
     return best
+
+
+def pair_beats_best_single(
+    truck: TruckInput,
+    loads: list[LoadInput],
+    diesel_usd_per_gal: float,
+    pair: TripPair | None,
+) -> bool:
+    if not pair:
+        return False
+    ranked = rank_loads(truck, loads, diesel_usd_per_gal)
+    if not ranked:
+        return False
+    by_id = {l.id: l for l in loads}
+    single = single_load_net_per_hour(truck, by_id[ranked[0].load_id], diesel_usd_per_gal)
+    return pair.combined_score > single

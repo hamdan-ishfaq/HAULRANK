@@ -1,12 +1,14 @@
 import hashlib
+import logging
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.backhaul.engine import best_chain_for_top_outbounds
+from apps.backhaul.engine import best_chain_for_top_outbounds, pair_beats_best_single
 from apps.backhaul.models import TripChain
 from apps.fleet.models import Truck
 from apps.fleet.reliability import eligible_for_high_value, reliability_score
@@ -15,22 +17,52 @@ from apps.rates.models import LaneRateHistory, benchmark
 from apps.scoring.engine import LoadInput, TruckInput, rank_loads
 from apps.scoring.models import ScoreBreakdown, ScoreRun
 from apps.weather.service import annotate_weather
-from django.conf import settings
 from integrations.eia import get_diesel_usd_per_gal
 
 CACHE_TTL = 120
+logger = logging.getLogger(__name__)
 
 
-def _loads_hash(load_ids: list[int]) -> str:
-    raw = ",".join(str(i) for i in sorted(load_ids))
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+def _rank_fingerprint(truck_in: TruckInput, loads: list[LoadInput], diesel: float) -> str:
+    """Hash all fields that affect scoring/backhaul so rate edits bust the cache."""
+    parts: list[str] = [
+        f"t:{truck_in.id}:{truck_in.equipment_type}:{truck_in.lat:.5f}:{truck_in.lon:.5f}"
+        f":{truck_in.mpg}:{truck_in.hos_hours_remaining}"
+        f":{','.join(truck_in.preferred_markets)}:{','.join(truck_in.no_go_markets)}",
+        f"d:{round(diesel, 4)}",
+    ]
+    for l in sorted(loads, key=lambda x: x.id):
+        parts.append(
+            f"l:{l.id}:{l.origin_lat:.5f}:{l.origin_lon:.5f}:{l.dest_lat:.5f}:{l.dest_lon:.5f}"
+            f":{l.dest_market}:{l.miles}:{l.rate_usd}:{l.equipment_type}:{l.est_transit_hours}"
+        )
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _cache_get(key: str):
+    try:
+        return cache.get(key)
+    except Exception as exc:
+        logger.warning("cache get failed for %s: %s", key, exc)
+        return None
+
+
+def _cache_set(key: str, value, ttl: int) -> None:
+    try:
+        cache.set(key, value, ttl)
+    except Exception as exc:
+        logger.warning("cache set failed for %s: %s", key, exc)
 
 
 class RankView(APIView):
     def post(self, request):
-        truck_id = request.query_params.get("truck_id") or request.data.get("truck_id")
-        if not truck_id:
+        truck_id_raw = request.query_params.get("truck_id") or request.data.get("truck_id")
+        if truck_id_raw is None or truck_id_raw == "":
             return Response({"detail": "truck_id required"}, status=400)
+        try:
+            truck_id = int(truck_id_raw)
+        except (TypeError, ValueError):
+            return Response({"detail": "truck_id must be an integer"}, status=400)
 
         try:
             truck = Truck.objects.select_related("driver", "carrier").get(
@@ -43,12 +75,6 @@ class RankView(APIView):
             return Response({"detail": "Truck has no driver"}, status=400)
 
         loads = list(Load.objects.all())
-        load_ids = [l.id for l in loads]
-        cache_key = f"rank:{truck.id}:{_loads_hash(load_ids)}"
-        cached = cache.get(cache_key)
-        if cached:
-            return Response(cached)
-
         diesel = get_diesel_usd_per_gal()
         driver = truck.driver
         truck_in = TruckInput(
@@ -76,9 +102,13 @@ class RankView(APIView):
             )
             for l in loads
         ]
+        cache_key = f"rank:{truck.id}:{_rank_fingerprint(truck_in, load_ins, diesel)}"
+        cached = _cache_get(cache_key)
+        if cached:
+            return Response(cached)
+
         ranked = rank_loads(truck_in, load_ins, diesel)
         pair = best_chain_for_top_outbounds(truck_in, load_ins, diesel)
-        # Live weather via Open-Meteo (no key). Demo only if WEATHER_DEMO=1.
         demo_id = None
         if getattr(settings, "WEATHER_DEMO", False) and ranked:
             demo_id = ranked[0].load_id
@@ -87,7 +117,6 @@ class RankView(APIView):
             for w in annotate_weather(load_ins, ranked, demo_load_id=demo_id)
         }
 
-        # Rate benchmarks by dest market
         history_by_market: dict[str, list[float]] = {}
         for row in LaneRateHistory.objects.all():
             history_by_market.setdefault(row.dest_market, []).append(row.avg_rate_per_mile)
@@ -108,7 +137,6 @@ class RankView(APIView):
                     r.rate_per_mile,
                     history_by_market.get(load_obj.dest_market, []),
                 )
-                # small weight blend: nudge overall by z-score (capped)
                 overall = r.overall + max(-0.05, min(0.05, bench["z_score"] * 0.02))
                 gated = not eligible_for_high_value(driver_rel, load_obj.rate_usd)
 
@@ -125,6 +153,7 @@ class RankView(APIView):
                     rate_per_mile=r.rate_per_mile,
                     rank=i,
                 )
+                wx = weather_rows.get(r.load_id, {})
                 results.append(
                     {
                         "rank": i,
@@ -137,26 +166,23 @@ class RankView(APIView):
                         "market_preference_score": r.market_preference_score,
                         "deadhead_miles": r.deadhead_miles,
                         "rate_per_mile": r.rate_per_mile,
-                        "weather_risk": weather_rows.get(r.load_id, {}).get(
-                            "weather_risk", False
-                        ),
-                        "weather_reason": weather_rows.get(r.load_id, {}).get(
-                            "weather_reason", ""
-                        ),
-                        "overall_adjusted": weather_rows.get(r.load_id, {}).get(
-                            "overall_adjusted", overall
-                        ),
+                        "weather_risk": wx.get("weather_risk", False),
+                        "weather_status": wx.get("weather_status", "unavailable"),
+                        "weather_reason": wx.get("weather_reason", ""),
+                        "overall_adjusted": wx.get("overall_adjusted", overall),
                         "rate_benchmark": bench,
                         "compliance_gated": gated,
                         "driver_reliability": driver_rel,
                     }
                 )
-            # drop gated high-value loads from visible ranking (still auditable via field)
             results = [row for row in results if not row["compliance_gated"]]
             for i, row in enumerate(results, start=1):
                 row["rank"] = i
             best_pair = None
-            if pair:
+            beats = (
+                pair_beats_best_single(truck_in, load_ins, diesel, pair) if pair else False
+            )
+            if pair and beats:
                 TripChain.objects.create(
                     outbound_id=pair.outbound_id,
                     return_load_id=pair.return_id,
@@ -172,6 +198,8 @@ class RankView(APIView):
                     "total_deadhead_miles": pair.total_deadhead_miles,
                     "total_hours": pair.total_hours,
                     "total_rate_usd": pair.total_rate_usd,
+                    "beats_best_single": True,
+                    "metric": "net_usd_per_hour",
                 }
 
         payload = {
@@ -182,5 +210,5 @@ class RankView(APIView):
             "best_single": results[0] if results else None,
             "best_pair": best_pair,
         }
-        cache.set(cache_key, payload, CACHE_TTL)
+        _cache_set(cache_key, payload, CACHE_TTL)
         return Response(payload, status=status.HTTP_201_CREATED)

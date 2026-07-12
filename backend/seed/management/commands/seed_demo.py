@@ -49,7 +49,8 @@ class Command(BaseCommand):
 
         profiles = [
             # eq, city, hos, pref, nogo, violations, insp, ontime
-            ("dry_van", "Dallas", 10.0, ["TX", "OK"], ["NY"], 0, 0.98, 0.94),
+            # Dallas HOS 14h so the seeded backhaul round-trip is HOS-feasible
+            ("dry_van", "Dallas", 14.0, ["TX", "OK"], ["NY"], 0, 0.98, 0.94),
             ("reefer", "Houston", 8.0, ["TX"], [], 1, 0.92, 0.88),
             ("flatbed", "OKC", 11.0, ["OK", "TX"], [], 0, 0.96, 0.91),
             ("dry_van", "Austin", 4.0, ["TX"], [], 4, 0.70, 0.60),  # weak compliance
@@ -123,6 +124,55 @@ class Command(BaseCommand):
                         break
                 if n >= 80:
                     break
+
+        # Guaranteed Dallas↔Houston dry_van round-trip that beats best single on $/hr.
+        # Idempotent: wipe prior demo-tagged loads by unique rate/miles fingerprint.
+        start = timezone.now()
+        dallas, houston = CITIES["Dallas"], CITIES["Houston"]
+        Load.objects.filter(
+            equipment_type="dry_van",
+            miles=240.0,
+            rate_usd__in=[720.0, 1250.0],
+            dest_market="TX",
+        ).filter(
+            origin_lat__in=[dallas[0], houston[0]],
+        ).delete()
+        Load.objects.create(
+            origin_lat=dallas[0],
+            origin_lon=dallas[1],
+            dest_lat=houston[0],
+            dest_lon=houston[1],
+            dest_market="TX",
+            miles=240.0,
+            rate_usd=720.0,
+            equipment_type="dry_van",
+            pickup_window_start=start,
+            pickup_window_end=start + timedelta(hours=8),
+            est_transit_hours=4.5,
+        )
+        Load.objects.create(
+            origin_lat=houston[0],
+            origin_lon=houston[1],
+            dest_lat=dallas[0],
+            dest_lon=dallas[1],
+            dest_market="TX",
+            miles=240.0,
+            rate_usd=1250.0,
+            equipment_type="dry_van",
+            pickup_window_start=start + timedelta(hours=6),
+            pickup_window_end=start + timedelta(hours=14),
+            est_transit_hours=4.5,
+        )
+
+        # Keep Dallas driver HOS aligned even if trucks already existed
+        dallas_truck = (
+            Truck.objects.filter(carrier=carrier, equipment_type="dry_van")
+            .select_related("driver")
+            .order_by("id")
+            .first()
+        )
+        if dallas_truck and hasattr(dallas_truck, "driver"):
+            Driver.objects.filter(pk=dallas_truck.driver.pk).update(hos_hours_remaining=14.0)
 
         call_command("seed_rates")
         self.stdout.write(

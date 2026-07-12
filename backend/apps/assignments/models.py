@@ -1,8 +1,11 @@
-from django.db import models
+from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.fleet.models import Truck
 from apps.loads.models import Load
+
+ACTIVE_STATUSES = ("offered", "accepted", "dispatched")
 
 
 class Assignment(models.Model):
@@ -26,6 +29,15 @@ class Assignment(models.Model):
     )
     status_history = models.JSONField(default=list)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["load"],
+                condition=Q(status__in=list(ACTIVE_STATUSES)),
+                name="uniq_active_assignment_per_load",
+            )
+        ]
+
     def save(self, *args, **kwargs):
         if not self.status_history:
             self.status_history = [
@@ -34,14 +46,45 @@ class Assignment(models.Model):
         super().save(*args, **kwargs)
 
     def transition_to(self, new_status: str, by: str | None = None):
-        allowed = self.TRANSITIONS.get(self.status, set())
-        if new_status not in allowed:
-            raise ValueError(f"Cannot transition {self.status} → {new_status}")
-        self.status = new_status
-        entry = {"status": new_status, "at": timezone.now().isoformat()}
-        if by:
-            entry["by"] = by
-        history = list(self.status_history or [])
-        history.append(entry)
-        self.status_history = history
-        self.save(update_fields=["status", "status_history"])
+        with transaction.atomic():
+            # Lock the load row first so concurrent accepts serialize (no deadlock).
+            Load.objects.select_for_update().filter(pk=self.load_id).get()
+            try:
+                locked = Assignment.objects.select_for_update().filter(pk=self.pk).get()
+            except Assignment.DoesNotExist as exc:
+                # Competing accept already won and deleted this offer.
+                raise ValueError("Load already has an active assignment") from exc
+
+            allowed = locked.TRANSITIONS.get(locked.status, set())
+            if new_status not in allowed:
+                raise ValueError(f"Cannot transition {locked.status} → {new_status}")
+
+            if new_status == Assignment.Status.ACCEPTED:
+                # Another truck already won this load
+                if (
+                    Assignment.objects.filter(
+                        load_id=locked.load_id,
+                        status__in=[
+                            Assignment.Status.ACCEPTED,
+                            Assignment.Status.DISPATCHED,
+                        ],
+                    )
+                    .exclude(pk=locked.pk)
+                    .exists()
+                ):
+                    raise ValueError("Load already has an active assignment")
+                # Drop competing offers (unique constraint: one active row)
+                Assignment.objects.filter(
+                    load_id=locked.load_id, status=Assignment.Status.OFFERED
+                ).exclude(pk=locked.pk).delete()
+
+            locked.status = new_status
+            entry = {"status": new_status, "at": timezone.now().isoformat()}
+            if by:
+                entry["by"] = by
+            history = list(locked.status_history or [])
+            history.append(entry)
+            locked.status_history = history
+            locked.save(update_fields=["status", "status_history"])
+            self.status = locked.status
+            self.status_history = locked.status_history

@@ -13,13 +13,13 @@ class AssignmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Assignment.objects.filter(
             truck__carrier__owner=self.request.user
-        ).select_related("load", "truck")
+        ).select_related("load", "truck", "truck__driver")
 
     def partial_update(self, request, *args, **kwargs):
-        assignment = self.get_object()
         ser = AssignmentStatusSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         try:
+            assignment = self.get_object()
             assignment.transition_to(
                 ser.validated_data["status"], by=request.user.username
             )

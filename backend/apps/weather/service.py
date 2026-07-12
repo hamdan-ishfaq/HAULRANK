@@ -30,6 +30,7 @@ def annotate_weather(
             {
                 "load_id": r.load_id,
                 "weather_risk": risk.active,
+                "weather_status": risk.status,
                 "weather_reason": risk.reason,
                 "overall_adjusted": adj_overall,
             }

@@ -93,6 +93,8 @@ def test_hos_blocks_return():
 
 
 def test_chain_beats_single_scenario():
+    from apps.backhaul.engine import pair_beats_best_single, single_load_net_per_hour
+
     t = truck(hos_hours_remaining=16)
     outbound = load(1, rate_usd=700, miles=240)
     strong_return = load(
@@ -105,8 +107,10 @@ def test_chain_beats_single_scenario():
         rate_usd=1100,
         est_transit_hours=4.5,
     )
-    pair = best_chain_for_top_outbounds(t, [outbound, strong_return], 3.8)
+    loads = [outbound, strong_return]
+    pair = best_chain_for_top_outbounds(t, loads, 3.8)
     assert pair is not None
     assert pair.outbound_id == 1
     assert pair.return_id == 2
-    assert pair.combined_score > 0
+    assert pair.combined_score > single_load_net_per_hour(t, outbound, 3.8)
+    assert pair_beats_best_single(t, loads, 3.8, pair) is True
