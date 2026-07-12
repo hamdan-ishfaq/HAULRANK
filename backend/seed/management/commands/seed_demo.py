@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -47,15 +48,16 @@ class Command(BaseCommand):
         )
 
         profiles = [
-            ("dry_van", "Dallas", 10.0, ["TX", "OK"], ["NY"]),
-            ("reefer", "Houston", 8.0, ["TX"], []),
-            ("flatbed", "OKC", 11.0, ["OK", "TX"], []),
-            ("dry_van", "Austin", 4.0, ["TX"], []),  # tight HOS
-            ("dry_van", "Memphis", 9.0, ["TN", "GA"], []),
+            # eq, city, hos, pref, nogo, violations, insp, ontime
+            ("dry_van", "Dallas", 10.0, ["TX", "OK"], ["NY"], 0, 0.98, 0.94),
+            ("reefer", "Houston", 8.0, ["TX"], [], 1, 0.92, 0.88),
+            ("flatbed", "OKC", 11.0, ["OK", "TX"], [], 0, 0.96, 0.91),
+            ("dry_van", "Austin", 4.0, ["TX"], [], 4, 0.70, 0.60),  # weak compliance
+            ("dry_van", "Memphis", 9.0, ["TN", "GA"], [], 0, 0.95, 0.90),
         ]
         if Truck.objects.filter(carrier=carrier).count() < len(profiles):
             Truck.objects.filter(carrier=carrier).delete()
-            for eq, city, hos, pref, nogo in profiles:
+            for eq, city, hos, pref, nogo, viol, insp, ontime in profiles:
                 lat, lon, _ = CITIES[city]
                 t = Truck.objects.create(
                     carrier=carrier,
@@ -71,6 +73,21 @@ class Command(BaseCommand):
                     home_base_lon=lon,
                     preferred_markets=pref,
                     no_go_markets=nogo,
+                    hos_violations_90d=viol,
+                    inspection_pass_rate=insp,
+                    on_time_pct=ontime,
+                )
+
+        for truck, profile in zip(
+            Truck.objects.filter(carrier=carrier).select_related("driver").order_by("id"),
+            profiles,
+        ):
+            _, _, _, _, _, viol, insp, ontime = profile
+            if hasattr(truck, "driver") and truck.driver is not None:
+                Driver.objects.filter(pk=truck.driver.pk).update(
+                    hos_violations_90d=viol,
+                    inspection_pass_rate=insp,
+                    on_time_pct=ontime,
                 )
 
         if Load.objects.count() < 50:
@@ -107,6 +124,7 @@ class Command(BaseCommand):
                 if n >= 80:
                     break
 
+        call_command("seed_rates")
         self.stdout.write(
             self.style.SUCCESS(
                 f"Seeded carrier={carrier.name} trucks={Truck.objects.filter(carrier=carrier).count()} "

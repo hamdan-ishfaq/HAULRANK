@@ -37,6 +37,20 @@ class Driver(models.Model):
     home_base_lon = models.FloatField()
     preferred_markets = models.JSONField(default=list)
     no_go_markets = models.JSONField(default=list)
+    # Tier 3 — synthetic compliance signals (Sentinel-echo)
+    hos_violations_90d = models.PositiveIntegerField(default=0)
+    inspection_pass_rate = models.FloatField(default=0.95)
+    on_time_pct = models.FloatField(default=0.90)
 
     def __str__(self) -> str:
         return f"driver@{self.truck_id}"
+
+    @property
+    def reliability_score(self) -> float:
+        from apps.fleet.reliability import reliability_score
+
+        return reliability_score(
+            self.hos_violations_90d,
+            self.inspection_pass_rate,
+            self.on_time_pct,
+        )

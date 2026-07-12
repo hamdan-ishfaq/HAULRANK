@@ -17,4 +17,6 @@ urlpatterns = [
     path("api/", include("apps.explain.urls")),
     path("api/", include("apps.copilot.urls")),
     path("api/", include("apps.assignments.urls")),
+    path("api/", include("apps.fleet_opt.urls")),
+    path("api/", include("apps.analytics.urls")),
 ]

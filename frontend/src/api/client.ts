@@ -41,6 +41,10 @@ export type Driver = {
   home_base_lon: number;
   preferred_markets: string[];
   no_go_markets: string[];
+  hos_violations_90d?: number;
+  inspection_pass_rate?: number;
+  on_time_pct?: number;
+  reliability_score?: number;
 };
 
 export type Truck = {
@@ -66,6 +70,8 @@ export type RankResult = {
   weather_risk?: boolean;
   weather_reason?: string;
   overall_adjusted?: number;
+  rate_benchmark?: { z_score: number; flag: string; lane_avg: number };
+  driver_reliability?: number;
 };
 
 export type RankResponse = {
@@ -127,6 +133,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+  fleetOptimize: () =>
+    req<{
+      assignments: { truck_id: number; load_id: number; score: number }[];
+    }>("/api/fleet/optimize/", { method: "POST" }),
+  analytics: () =>
+    req<{
+      revenue_by_truck: { truck_id: number; revenue_usd: number }[];
+      acceptance_rate: number;
+      avg_deadhead_miles: number;
+      avg_score_all: number;
+      avg_score_accepted: number;
+      assignment_count: number;
+      delivered_count: number;
+    }>("/api/analytics/summary/"),
 };
 
 export { API_BASE };

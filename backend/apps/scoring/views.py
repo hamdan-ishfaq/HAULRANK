@@ -9,7 +9,9 @@ from rest_framework.views import APIView
 from apps.backhaul.engine import best_chain_for_top_outbounds
 from apps.backhaul.models import TripChain
 from apps.fleet.models import Truck
+from apps.fleet.reliability import eligible_for_high_value, reliability_score
 from apps.loads.models import Load
+from apps.rates.models import LaneRateHistory, benchmark
 from apps.scoring.engine import LoadInput, TruckInput, rank_loads
 from apps.scoring.models import ScoreBreakdown, ScoreRun
 from apps.weather.service import annotate_weather
@@ -85,10 +87,31 @@ class RankView(APIView):
             for w in annotate_weather(load_ins, ranked, demo_load_id=demo_id)
         }
 
+        # Rate benchmarks by dest market
+        history_by_market: dict[str, list[float]] = {}
+        for row in LaneRateHistory.objects.all():
+            history_by_market.setdefault(row.dest_market, []).append(row.avg_rate_per_mile)
+        load_by_id = {l.id: l for l in loads}
+
+        driver_rel = reliability_score(
+            driver.hos_violations_90d,
+            driver.inspection_pass_rate,
+            driver.on_time_pct,
+        )
+
         with transaction.atomic():
             run = ScoreRun.objects.create(truck=truck, diesel_usd_per_gal=diesel)
             results = []
             for i, r in enumerate(ranked, start=1):
+                load_obj = load_by_id[r.load_id]
+                bench = benchmark(
+                    r.rate_per_mile,
+                    history_by_market.get(load_obj.dest_market, []),
+                )
+                # small weight blend: nudge overall by z-score (capped)
+                overall = r.overall + max(-0.05, min(0.05, bench["z_score"] * 0.02))
+                gated = not eligible_for_high_value(driver_rel, load_obj.rate_usd)
+
                 ScoreBreakdown.objects.create(
                     score_run=run,
                     load_id=r.load_id,
@@ -97,7 +120,7 @@ class RankView(APIView):
                     fuel_efficiency_score=r.fuel_efficiency_score,
                     hos_feasibility=r.hos_feasibility,
                     market_preference_score=r.market_preference_score,
-                    overall=r.overall,
+                    overall=overall,
                     deadhead_miles=r.deadhead_miles,
                     rate_per_mile=r.rate_per_mile,
                     rank=i,
@@ -106,7 +129,7 @@ class RankView(APIView):
                     {
                         "rank": i,
                         "load_id": r.load_id,
-                        "overall": r.overall,
+                        "overall": overall,
                         "rate_per_mile_score": r.rate_per_mile_score,
                         "deadhead_penalty": r.deadhead_penalty,
                         "fuel_efficiency_score": r.fuel_efficiency_score,
@@ -121,10 +144,17 @@ class RankView(APIView):
                             "weather_reason", ""
                         ),
                         "overall_adjusted": weather_rows.get(r.load_id, {}).get(
-                            "overall_adjusted", r.overall
+                            "overall_adjusted", overall
                         ),
+                        "rate_benchmark": bench,
+                        "compliance_gated": gated,
+                        "driver_reliability": driver_rel,
                     }
                 )
+            # drop gated high-value loads from visible ranking (still auditable via field)
+            results = [row for row in results if not row["compliance_gated"]]
+            for i, row in enumerate(results, start=1):
+                row["rank"] = i
             best_pair = None
             if pair:
                 TripChain.objects.create(

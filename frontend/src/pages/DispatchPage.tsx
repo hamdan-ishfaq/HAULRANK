@@ -69,6 +69,17 @@ export default function DispatchPage() {
   const [error, setError] = useState("");
   const [copilotMsg, setCopilotMsg] = useState("dry van loads to TX that net at least 2000");
   const [copilotOut, setCopilotOut] = useState("");
+  const [fleetPairs, setFleetPairs] = useState<
+    { truck_id: number; load_id: number; score: number }[]
+  >([]);
+  const [analytics, setAnalytics] = useState<{
+    revenue_by_truck: { truck_id: number; revenue_usd: number }[];
+    acceptance_rate: number;
+    avg_deadhead_miles: number;
+    avg_score_all: number;
+    avg_score_accepted: number;
+    delivered_count: number;
+  } | null>(null);
 
   const selected = trucks.find((t) => t.id === truckId);
 
@@ -81,6 +92,7 @@ export default function DispatchPage() {
       })
       .catch((e) => setError(String(e)));
     api.assignments().then(setAssignments).catch(() => undefined);
+    api.analytics().then(setAnalytics).catch(() => undefined);
   }, []);
 
   async function runRank() {
@@ -122,6 +134,19 @@ export default function DispatchPage() {
       setCopilotOut(
         `${data.narration}\n\nFilters: ${JSON.stringify(data.filters)} · hits: ${data.results.length}`,
       );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runFleetOpt() {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api.fleetOptimize();
+      setFleetPairs(data.assignments);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -176,6 +201,18 @@ export default function DispatchPage() {
         minWidth: 280,
         sortable: false,
         renderCell: (p) => <FactorChips row={p.row as RankResult} />,
+      },
+      {
+        field: "rate_benchmark",
+        headerName: "Market",
+        width: 120,
+        renderCell: (p) => {
+          const flag = p.row.rate_benchmark?.flag;
+          if (!flag) return "—";
+          const color =
+            flag === "above_market" ? "success" : flag === "below_market" ? "error" : "default";
+          return <Chip size="small" color={color as "success" | "error" | "default"} label={flag.replace("_", " ")} />;
+        },
       },
       {
         field: "weather_risk",
@@ -236,13 +273,14 @@ export default function DispatchPage() {
               value={truckId}
               onChange={(e) => setTruckId(e.target.value as number)}
             >
-              {trucks.map((t) => (
-                <MenuItem key={t.id} value={t.id}>
-                  #{t.id} {t.equipment_type} · HOS{" "}
-                  {t.driver?.hos_hours_remaining ?? "?"}h · ({t.current_lat.toFixed(2)},{" "}
-                  {t.current_lon.toFixed(2)})
-                </MenuItem>
-              ))}
+{trucks.map((t) => (
+                  <MenuItem key={t.id} value={t.id}>
+                    #{t.id} {t.equipment_type} · HOS{" "}
+                    {t.driver?.hos_hours_remaining ?? "?"}h · rel{" "}
+                    {((t.driver?.reliability_score ?? 0) * 100).toFixed(0)}% · (
+                    {t.current_lat.toFixed(2)}, {t.current_lon.toFixed(2)})
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
           <Button variant="contained" onClick={runRank} disabled={busy || truckId === ""}>
@@ -254,6 +292,9 @@ export default function DispatchPage() {
             disabled={busy || !rank}
           >
             Explain top 3
+          </Button>
+          <Button variant="outlined" onClick={runFleetOpt} disabled={busy}>
+            Optimize fleet
           </Button>
           {selected?.driver && (
             <Typography color="text.secondary">
@@ -320,6 +361,36 @@ export default function DispatchPage() {
             </Button>
           </Box>
         </Collapse>
+
+        {fleetPairs.length > 0 && (
+          <Box mb={2} p={2} bgcolor="#eef2f0" borderRadius={1}>
+            <Typography variant="subtitle1">Fleet-optimal assignments</Typography>
+            {fleetPairs.map((p) => (
+              <Typography key={`${p.truck_id}-${p.load_id}`} variant="body2">
+                Truck #{p.truck_id} → load #{p.load_id} (score {p.score.toFixed(3)})
+              </Typography>
+            ))}
+          </Box>
+        )}
+
+        {analytics && (
+          <Box mb={2} p={2} bgcolor="#f7f4ee" borderRadius={1}>
+            <Typography variant="subtitle1" gutterBottom>
+              Fleet analytics
+            </Typography>
+            <Typography variant="body2">
+              Acceptance {(analytics.acceptance_rate * 100).toFixed(0)}% · avg deadhead{" "}
+              {analytics.avg_deadhead_miles} mi · delivered {analytics.delivered_count} · avg score
+              all {analytics.avg_score_all.toFixed(2)} / accepted{" "}
+              {analytics.avg_score_accepted.toFixed(2)}
+            </Typography>
+            {analytics.revenue_by_truck.map((r) => (
+              <Typography key={r.truck_id} variant="body2">
+                Truck #{r.truck_id} revenue ${r.revenue_usd.toFixed(0)}
+              </Typography>
+            ))}
+          </Box>
+        )}
 
         <Typography variant="h6" gutterBottom>
           Dispatcher copilot

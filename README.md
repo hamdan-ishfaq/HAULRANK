@@ -10,7 +10,8 @@ Transparent load-scoring and dispatch-ranking for small carriers — a scoped-do
 2. **Rank API** — ranked loads + factor breakdown, Redis-cached.
 3. **Grounded explanations** — Groq narrates stored breakdowns for top 3 only (never invents the score).
 4. **Assignments** — `offered → accepted → dispatched → delivered` with audit history.
-5. **Tier 2** — backhaul trip-chain, dispatcher copilot (intent → same engine), weather risk flag.
+5. **Tier 2** — backhaul trip-chain, dispatcher copilot (intent → same engine), weather risk (Open-Meteo).
+6. **Tier 3** — fleet Hungarian assignment, driver reliability badge, rate z-score flags, analytics summary.
 
 Load board data is **synthetic** (seeded CSV/JSON), stated openly — no fake live DAT integration.
 

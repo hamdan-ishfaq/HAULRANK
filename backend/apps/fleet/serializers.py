@@ -1,9 +1,12 @@
 from rest_framework import serializers
 
 from .models import Driver, Truck
+from .reliability import reliability_score
 
 
 class DriverSerializer(serializers.ModelSerializer):
+    reliability_score = serializers.SerializerMethodField()
+
     class Meta:
         model = Driver
         fields = (
@@ -12,6 +15,15 @@ class DriverSerializer(serializers.ModelSerializer):
             "home_base_lon",
             "preferred_markets",
             "no_go_markets",
+            "hos_violations_90d",
+            "inspection_pass_rate",
+            "on_time_pct",
+            "reliability_score",
+        )
+
+    def get_reliability_score(self, obj):
+        return reliability_score(
+            obj.hos_violations_90d, obj.inspection_pass_rate, obj.on_time_pct
         )
 
 
