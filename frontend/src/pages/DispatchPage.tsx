@@ -10,6 +10,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  TextField,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -66,6 +67,8 @@ export default function DispatchPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [copilotMsg, setCopilotMsg] = useState("dry van loads to TX that net at least 2000");
+  const [copilotOut, setCopilotOut] = useState("");
 
   const selected = trucks.find((t) => t.id === truckId);
 
@@ -103,6 +106,22 @@ export default function DispatchPage() {
       const map: Record<number, string> = {};
       for (const e of data.explanations) map[e.load_id] = e.explanation_text;
       setExplanations(map);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function askCopilot() {
+    if (truckId === "") return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api.copilot(Number(truckId), copilotMsg);
+      setCopilotOut(
+        `${data.narration}\n\nFilters: ${JSON.stringify(data.filters)} · hits: ${data.results.length}`,
+      );
     } catch (e) {
       setError(String(e));
     } finally {
@@ -290,6 +309,27 @@ export default function DispatchPage() {
             </Button>
           </Box>
         </Collapse>
+
+        <Typography variant="h6" gutterBottom>
+          Dispatcher copilot
+        </Typography>
+        <Stack direction={{ xs: "column", md: "row" }} gap={1} mb={2}>
+          <TextField
+            fullWidth
+            size="small"
+            value={copilotMsg}
+            onChange={(e) => setCopilotMsg(e.target.value)}
+            placeholder="what gets me to Texas and nets $2000?"
+          />
+          <Button variant="contained" onClick={askCopilot} disabled={busy || truckId === ""}>
+            Ask
+          </Button>
+        </Stack>
+        {copilotOut && (
+          <Typography variant="body2" mb={3} whiteSpace="pre-wrap">
+            {copilotOut}
+          </Typography>
+        )}
 
         <Typography variant="h6" gutterBottom>
           Assignments

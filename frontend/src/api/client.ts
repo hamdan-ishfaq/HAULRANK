@@ -103,6 +103,16 @@ export const api = {
         explanation_text: string;
       }[];
     }>(`/api/rank/${scoreRunId}/explain/`, { method: "POST" }),
+  copilot: (truckId: number, message: string) =>
+    req<{
+      filters: Record<string, unknown>;
+      results: { load_id: number; overall: number; rate_per_mile: number }[];
+      best_pair: { outbound_id: number; return_id: number; combined_score: number } | null;
+      narration: string;
+    }>("/api/copilot/", {
+      method: "POST",
+      body: JSON.stringify({ truck_id: truckId, message }),
+    }),
   assignments: () => req<Assignment[]>("/api/assignments/"),
   createAssignment: (load: number, truck: number) =>
     req<Assignment>("/api/assignments/", {
