@@ -71,7 +71,18 @@ def main():
     else:
         print("NOTE: best_pair null for this truck (ok if no nearby returns)")
     score_run_id = rank["score_run_id"]
-    load_id = rank["results"][0]["load_id"]
+    # pick a load that is not already accepted+
+    code, existing = call("GET", "/api/assignments/", token=token)
+    taken = {
+        a["load"]
+        for a in (existing if isinstance(existing, list) else [])
+        if a.get("status") in ("accepted", "dispatched", "delivered", "offered")
+    }
+    load_id = next(
+        (r["load_id"] for r in rank["results"] if r["load_id"] not in taken),
+        None,
+    )
+    must(load_id is not None, "free load available to assign")
 
     # explain without GROQ key should 503 — still a valid guarded path
     code, expl = call("POST", f"/api/rank/{score_run_id}/explain/", token=token)
