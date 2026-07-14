@@ -79,9 +79,14 @@ export default function DispatchPage() {
   const [error, setError] = useState("");
   const [copilotMsg, setCopilotMsg] = useState("dry van loads to TX that net at least 2000");
   const [copilotOut, setCopilotOut] = useState("");
-  const [fleetPairs, setFleetPairs] = useState<
-    { truck_id: number; load_id: number; score: number }[]
-  >([]);
+  const [fleetOpt, setFleetOpt] = useState<{
+    solver: string;
+    objective_value: number;
+    assignments: { truck_id: number; load_id: number; score: number }[];
+    constraints_summary: string[];
+    baseline_comparison?: { matches: boolean; reason: string; hungarian_objective: number };
+    locked_assignments: { truck_id: number; load_id: number }[];
+  } | null>(null);
   const [analytics, setAnalytics] = useState<{
     revenue_by_truck: { truck_id: number; revenue_usd: number }[];
     acceptance_rate: number;
@@ -155,8 +160,8 @@ export default function DispatchPage() {
     setBusy(true);
     setError("");
     try {
-      const data = await api.fleetOptimize();
-      setFleetPairs(data.assignments);
+      const data = await api.fleetOptimize("mip");
+      setFleetOpt(data);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -389,14 +394,35 @@ export default function DispatchPage() {
           </Box>
         </Collapse>
 
-        {fleetPairs.length > 0 && (
+        {fleetOpt && (
           <Box mb={2} p={2} bgcolor="#eef2f0" borderRadius={1}>
-            <Typography variant="subtitle1">Fleet-optimal assignments</Typography>
-            {fleetPairs.map((p) => (
+            <Typography variant="subtitle1">
+              Fleet-optimal assignments ({fleetOpt.solver}) · obj{" "}
+              {fleetOpt.objective_value.toFixed(3)}
+            </Typography>
+            {fleetOpt.locked_assignments?.length > 0 && (
+              <Typography variant="body2" color="text.secondary" mb={0.5}>
+                Locked:{" "}
+                {fleetOpt.locked_assignments
+                  .map((l) => `T#${l.truck_id}→L#${l.load_id}`)
+                  .join(", ")}
+              </Typography>
+            )}
+            {fleetOpt.assignments.map((p) => (
               <Typography key={`${p.truck_id}-${p.load_id}`} variant="body2">
                 Truck #{p.truck_id} → load #{p.load_id} (score {p.score.toFixed(3)})
               </Typography>
             ))}
+            {fleetOpt.constraints_summary?.length > 0 && (
+              <Typography variant="caption" display="block" mt={1} color="text.secondary">
+                Constraints: {fleetOpt.constraints_summary.join("; ")}
+              </Typography>
+            )}
+            {fleetOpt.baseline_comparison && (
+              <Typography variant="caption" display="block" color="text.secondary">
+                vs Hungarian: {fleetOpt.baseline_comparison.reason}
+              </Typography>
+            )}
           </Box>
         )}
 

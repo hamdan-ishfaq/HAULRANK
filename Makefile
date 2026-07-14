@@ -1,4 +1,4 @@
-.PHONY: api frontend test up e2e e2e-live down
+.PHONY: api frontend test up e2e e2e-live e2e-punish down
 
 api:
 	cd backend && . .venv/bin/activate && python manage.py runserver 0.0.0.0:8000
@@ -16,7 +16,9 @@ down:
 	docker compose down
 
 e2e:
-	python3 scripts/e2e.py http://127.0.0.1:8000 http://127.0.0.1:5173
+	python3 scripts/e2e_punish.py http://127.0.0.1:8000 http://127.0.0.1:5173
 
 e2e-live:
-	python3 scripts/e2e.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
+	python3 scripts/e2e_punish.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
+
+e2e-punish: e2e-live

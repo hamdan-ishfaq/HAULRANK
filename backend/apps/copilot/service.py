@@ -151,12 +151,152 @@ def ground_narration(narration: str, allowed: set[int], engine_payload: dict[str
     return narration
 
 
+def _wants_tool_path(message: str) -> bool:
+    """Route to tool loop for fleet-optimize intents (rank tools via run_copilot_tools / mocks)."""
+    m = message.lower()
+    return any(
+        h in m
+        for h in (
+            "optimize",
+            "whole fleet",
+            "entire fleet",
+            "assign all",
+            "fleet assignment",
+            "fleet-opt",
+            "optimize_fleet",
+        )
+    )
+
+
+def _allowed_from_tool_results(tool_results: list[dict[str, Any]]) -> set[int]:
+    allowed: set[int] = set()
+    for tr in tool_results:
+        payload = tr.get("result") or {}
+        for row in payload.get("results") or []:
+            if "load_id" in row:
+                allowed.add(int(row["load_id"]))
+        pair = payload.get("best_pair") or {}
+        for key in ("outbound_id", "return_id"):
+            if pair.get(key) is not None:
+                allowed.add(int(pair[key]))
+        for row in payload.get("assignments") or []:
+            if "load_id" in row:
+                allowed.add(int(row["load_id"]))
+        for row in payload.get("locked_assignments") or []:
+            if "load_id" in row:
+                allowed.add(int(row["load_id"]))
+    return allowed
+
+
+def run_copilot_tools(
+    message: str,
+    truck: TruckInput,
+    loads: list[LoadInput],
+    diesel: float,
+    *,
+    trucks: list[TruckInput] | None = None,
+    locked_pairs: list[tuple[int, int]] | None = None,
+) -> dict[str, Any]:
+    """Tool-calling path over rank_loads / optimize_fleet engines."""
+    from apps.copilot.tools import TOOL_SCHEMAS, TOOL_SYSTEM, make_tool_executor
+
+    fleet = trucks or [truck]
+    execute = make_tool_executor(
+        truck=truck,
+        trucks=fleet,
+        loads=loads,
+        diesel=diesel,
+        locked_pairs=locked_pairs or [],
+    )
+    narration, tools_called, tool_results = llm_client.complete_with_tools(
+        TOOL_SYSTEM,
+        message,
+        TOOL_SCHEMAS,
+        execute,
+    )
+    engine_payload: dict[str, Any] = {
+        "tools_called": tools_called,
+        "tool_results": tool_results,
+    }
+    # Surface primary tool payload for UI compatibility
+    filters: dict[str, Any] = {}
+    results: list[dict[str, Any]] = []
+    best_pair = None
+    optimize_block = None
+    for tr in tool_results:
+        payload = tr.get("result") or {}
+        if tr.get("name") == "rank_loads":
+            filters = payload.get("filters") or {}
+            results = payload.get("results") or []
+            best_pair = payload.get("best_pair")
+            engine_payload.update(
+                {"filters": filters, "results": results, "best_pair": best_pair}
+            )
+        if tr.get("name") == "optimize_fleet":
+            optimize_block = payload
+            engine_payload["optimize"] = payload
+            # Map assignments into results-shaped list for grounding template
+            results = [
+                {
+                    "load_id": a["load_id"],
+                    "overall": a.get("score", 0),
+                    "rate_per_mile": 0.0,
+                    "deadhead_miles": 0.0,
+                }
+                for a in (payload.get("assignments") or [])
+            ]
+            engine_payload["results"] = results
+
+    allowed = _allowed_from_tool_results(tool_results)
+    if not narration:
+        narration = _template_narration(engine_payload)
+    narration = ground_narration(narration, allowed, engine_payload)
+    return {
+        "filters": filters,
+        "results": results,
+        "best_pair": best_pair,
+        "narration": narration,
+        "allowed_load_ids": sorted(allowed),
+        "tools_called": tools_called,
+        "optimize": optimize_block,
+        "constraints_summary": (
+            (optimize_block or {}).get("constraints_summary")
+            or (
+                (tool_results[0].get("result") or {}).get("constraints_summary")
+                if tool_results
+                else []
+            )
+            or []
+        ),
+    }
+
+
 def run_copilot(
     message: str,
     truck: TruckInput,
     loads: list[LoadInput],
     diesel: float,
+    *,
+    trucks: list[TruckInput] | None = None,
+    locked_pairs: list[tuple[int, int]] | None = None,
+    force_tools: bool | None = None,
 ) -> dict[str, Any]:
+    use_tools = force_tools if force_tools is not None else _wants_tool_path(message)
+    if use_tools:
+        try:
+            return run_copilot_tools(
+                message,
+                truck,
+                loads,
+                diesel,
+                trucks=trucks,
+                locked_pairs=locked_pairs,
+            )
+        except RuntimeError:
+            # Missing API key — fall through to classic path only if not forced
+            if force_tools:
+                raise
+
     filters = parse_filters(message)
     filtered = apply_filters(loads, filters)
     ranked = rank_loads(truck, filtered, diesel)[:10]
@@ -200,4 +340,5 @@ def run_copilot(
         "best_pair": engine_payload["best_pair"],
         "narration": narration,
         "allowed_load_ids": sorted(allowed),
+        "tools_called": [],
     }

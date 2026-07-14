@@ -7,6 +7,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.assignments.models import Assignment
 from apps.fleet.models import Carrier, Driver, Truck
 from apps.loads.models import Load
 
@@ -30,9 +31,18 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--flush", action="store_true")
+        parser.add_argument(
+            "--brownfield",
+            action="store_true",
+            help=(
+                "Create locked accepted/dispatched assignments so fleet optimize "
+                "only fills residual demand (planning analogy, not a digital twin)."
+            ),
+        )
 
     def handle(self, *args, **options):
         if options["flush"]:
+            Assignment.objects.all().delete()
             Load.objects.all().delete()
             Truck.objects.all().delete()
             Carrier.objects.all().delete()
@@ -174,11 +184,77 @@ class Command(BaseCommand):
         if dallas_truck and hasattr(dallas_truck, "driver"):
             Driver.objects.filter(pk=dallas_truck.driver.pk).update(hos_hours_remaining=14.0)
 
+        if options.get("brownfield"):
+            self._seed_brownfield_locks(carrier)
+
         call_command("seed_rates")
         call_command("poll_compliance")
+        locks = Assignment.objects.filter(
+            truck__carrier=carrier,
+            status__in=("accepted", "dispatched"),
+        ).count()
         self.stdout.write(
             self.style.SUCCESS(
                 f"Seeded carrier={carrier.name} trucks={Truck.objects.filter(carrier=carrier).count()} "
-                f"loads={Load.objects.count()} (user=demo / demo-pass-123)"
+                f"loads={Load.objects.count()} locked={locks} "
+                f"(user=demo / demo-pass-123)"
             )
         )
+
+    def _seed_brownfield_locks(self, carrier: Carrier) -> None:
+        """Two committed assignments — residual trucks optimize around them."""
+        trucks = list(
+            Truck.objects.filter(carrier=carrier).select_related("driver").order_by("id")
+        )
+        if len(trucks) < 2:
+            return
+        dallas = trucks[0]
+        houston = next(
+            (t for t in trucks if abs(t.current_lat - 29.76) < 0.2),
+            trucks[1],
+        )
+        # Prefer the seeded Dallas→Houston dry_van 240mi/$720 load
+        dh = (
+            Load.objects.filter(
+                equipment_type="dry_van",
+                miles=240.0,
+                rate_usd=720.0,
+            )
+            .order_by("id")
+            .first()
+        )
+        other = (
+            Load.objects.filter(equipment_type=houston.equipment_type)
+            .exclude(pk=dh.pk if dh else None)
+            .order_by("id")
+            .first()
+        )
+        def _lock(load, truck, status: str) -> None:
+            Assignment.objects.filter(
+                load=load, status__in=("offered", "accepted", "dispatched")
+            ).exclude(truck=truck).delete()
+            row = Assignment.objects.filter(
+                load=load, status__in=("offered", "accepted", "dispatched")
+            ).first()
+            hist = [
+                {
+                    "status": status,
+                    "at": timezone.now().isoformat(),
+                    "by": "seed_brownfield",
+                }
+            ]
+            if row:
+                row.truck = truck
+                row.status = status
+                row.status_history = hist
+                row.save(update_fields=["truck", "status", "status_history"])
+            else:
+                Assignment.objects.create(
+                    load=load, truck=truck, status=status, status_history=hist
+                )
+
+        if dh:
+            _lock(dh, dallas, Assignment.Status.DISPATCHED)
+        if other and (dh is None or other.pk != dh.pk):
+            _lock(other, houston, Assignment.Status.ACCEPTED)
+        self.stdout.write("  brownfield locks: Dallas dispatched + Houston accepted")

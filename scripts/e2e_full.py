@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Deprecated entry — redirects to the single system suite (`scripts/e2e.py`).
-
-Kept so older docs/commands still work.
-"""
+"""Deprecated entry — redirects to the post-deploy PUNISH suite."""
 
 from __future__ import annotations
 
@@ -11,9 +8,8 @@ import sys
 from pathlib import Path
 
 if __name__ == "__main__":
-    # Default local UI when only API host is passed (legacy e2e_full habit)
     if len(sys.argv) == 2:
         sys.argv.append("http://127.0.0.1:5173")
-    brutal = Path(__file__).resolve().parent / "e2e_brutal.py"
-    ns = runpy.run_path(str(brutal))
+    target = Path(__file__).resolve().parent / "e2e_punish.py"
+    ns = runpy.run_path(str(target))
     raise SystemExit(ns["main"]())

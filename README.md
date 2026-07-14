@@ -11,7 +11,7 @@ Transparent load-scoring and dispatch-ranking for small carriers — a scoped-do
 3. **Grounded explanations** — Groq narrates stored breakdowns for top 3 only (never invents the score).
 4. **Assignments** — `offered → accepted → dispatched → delivered` with audit history.
 5. **Tier 2** — backhaul trip-chain, dispatcher copilot (intent → same engine), weather risk (Open-Meteo).
-6. **Tier 3** — fleet Hungarian assignment, continuous compliance state machine (Sentinel-echo), rate z-score flags, analytics summary.
+6. **Tier 3** — fleet Hungarian + OR-Tools CP-SAT MIP assignment, continuous compliance (Sentinel-echo), rate z-score flags, analytics; copilot tool-calling over rank/optimize.
 
 Load board data is **synthetic** (seeded CSV/JSON), stated openly — no fake live DAT integration.
 
@@ -57,25 +57,30 @@ python manage.py runserver 0.0.0.0:8000
 cd frontend && npm install && npm run dev
 ```
 
-### System health E2E (one command)
+### Post-deploy PUNISH E2E (one command)
 
-Brutal live suite: auth/CORS/JWT abuse, rank/cache/HOS, assignment races, explain grounding, copilot adversarial prompts, fleet/analytics, frontend shell, **continuous compliance**.
+Adversarial live suite: auth/CORS/JWT abuse, leak probes, rank/cache/HOS, assignment races (10 trials), explain grounding, copilot adversarial + optimize tool path, **MIP/Hungarian/brownfield locks**, compliance Sentinel, frontend shell.
 
 ```bash
-# Local
-python3 scripts/e2e.py http://127.0.0.1:8000 http://127.0.0.1:5173
+# After push + Render/Vercel deploy — warm API first
+curl -sS https://haulrank-pdmh.onrender.com/api/health/
 
-# Live (Render + Vercel)
+python3 scripts/e2e_punish.py \
+  https://haulrank-pdmh.onrender.com \
+  https://haulrank.vercel.app
+
+# Aliases
 python3 scripts/e2e.py https://haulrank-pdmh.onrender.com https://haulrank.vercel.app
-
-# Same suite via make
-make e2e
 make e2e-live
 ```
 
 Unit tests: `cd backend && .venv/bin/python -m pytest -q`
 
-Pre-deploy handoff: [HANDOFF.md](HANDOFF.md). Compliance: [docs/COMPLIANCE.md](docs/COMPLIANCE.md). Free-tier deploy: [docs/DEPLOY.md](docs/DEPLOY.md). Tracing: [docs/TRACING.md](docs/TRACING.md).
+Handoff: [HANDOFF.md](HANDOFF.md). Fleet MIP: [docs/FLEET_MIP.md](docs/FLEET_MIP.md). Compliance: [docs/COMPLIANCE.md](docs/COMPLIANCE.md). Deploy: [docs/DEPLOY.md](docs/DEPLOY.md). Tracing: [docs/TRACING.md](docs/TRACING.md).
+
+**Brownfield seed (locked accepted/dispatched pairs for residual fleet opt):**  
+`cd backend && .venv/bin/python manage.py seed_demo --brownfield`  
+Freight brownfield lock = planning analogy for inserting capacity beside a committed plan — not a digital twin / facility geometry.
 
 ## Branches
 

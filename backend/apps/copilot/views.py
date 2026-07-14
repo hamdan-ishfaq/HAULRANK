@@ -3,11 +3,26 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.fleet.models import Truck
+from apps.fleet_opt.locks import locked_pairs_for_carrier
 from apps.loads.models import Load
 from apps.scoring.engine import LoadInput, TruckInput
 from integrations.eia import get_diesel_usd_per_gal
 
 from .service import run_copilot
+
+
+def _truck_input(t: Truck) -> TruckInput:
+    d = t.driver
+    return TruckInput(
+        id=t.id,
+        equipment_type=t.equipment_type,
+        lat=t.current_lat,
+        lon=t.current_lon,
+        mpg=t.mpg,
+        hos_hours_remaining=d.hos_hours_remaining,
+        preferred_markets=list(d.preferred_markets or []),
+        no_go_markets=list(d.no_go_markets or []),
+    )
 
 
 class CopilotView(APIView):
@@ -28,17 +43,13 @@ class CopilotView(APIView):
         if not hasattr(truck, "driver"):
             return Response({"detail": "Truck has no driver"}, status=400)
 
-        driver = truck.driver
-        truck_in = TruckInput(
-            id=truck.id,
-            equipment_type=truck.equipment_type,
-            lat=truck.current_lat,
-            lon=truck.current_lon,
-            mpg=truck.mpg,
-            hos_hours_remaining=driver.hos_hours_remaining,
-            preferred_markets=list(driver.preferred_markets or []),
-            no_go_markets=list(driver.no_go_markets or []),
+        truck_in = _truck_input(truck)
+        fleet_qs = (
+            Truck.objects.filter(carrier__owner=request.user)
+            .select_related("driver")
+            .order_by("id")
         )
+        trucks_in = [_truck_input(t) for t in fleet_qs if hasattr(t, "driver")]
         load_ins = [
             LoadInput(
                 id=l.id,
@@ -56,7 +67,14 @@ class CopilotView(APIView):
         ]
 
         try:
-            result = run_copilot(message, truck_in, load_ins, get_diesel_usd_per_gal())
+            result = run_copilot(
+                message,
+                truck_in,
+                load_ins,
+                get_diesel_usd_per_gal(),
+                trucks=trucks_in,
+                locked_pairs=locked_pairs_for_carrier(request.user),
+            )
         except ValueError as e:
             return Response({"detail": str(e)}, status=422)
         except RuntimeError as e:

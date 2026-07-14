@@ -170,10 +170,19 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
-  fleetOptimize: () =>
+  fleetOptimize: (solver: "mip" | "hungarian" = "mip") =>
     req<{
+      solver: string;
+      objective_value: number;
       assignments: { truck_id: number; load_id: number; score: number }[];
-    }>("/api/fleet/optimize/", { method: "POST" }),
+      constraints_summary: string[];
+      baseline_comparison: {
+        hungarian_objective: number;
+        matches: boolean;
+        reason: string;
+      };
+      locked_assignments: { truck_id: number; load_id: number }[];
+    }>(`/api/fleet/optimize/?solver=${solver}`, { method: "POST" }),
   analytics: () =>
     req<{
       revenue_by_truck: { truck_id: number; revenue_usd: number }[];

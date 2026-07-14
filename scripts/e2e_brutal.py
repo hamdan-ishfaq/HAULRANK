@@ -424,10 +424,22 @@ def main() -> int:
     ok(empty_msg.status == 400, "empty copilot message → 400")
 
     log("\n## 10. Fleet opt + analytics + filters")
-    fleet = call("POST", "/api/fleet/optimize/", token=token)
-    ok(fleet.status == 200, "fleet optimize")
-    lids = [a["load_id"] for a in (fleet.body.get("assignments") or [])]  # type: ignore[union-attr]
-    ok(len(lids) == len(set(lids)), "fleet no duplicate loads")
+    fleet = call("POST", "/api/fleet/optimize/?solver=mip", token=token)
+    ok(fleet.status == 200 and isinstance(fleet.body, dict), "fleet optimize mip")
+    if isinstance(fleet.body, dict):
+        ok(fleet.body.get("solver") == "mip", "optimize solver=mip")
+        ok(
+            isinstance(fleet.body.get("constraints_summary"), list)
+            and len(fleet.body.get("constraints_summary") or []) >= 1,
+            "constraints_summary non-empty",
+        )
+        ok("objective_value" in fleet.body, "objective_value present")
+        ok("baseline_comparison" in fleet.body, "baseline_comparison present")
+        ok("locked_assignments" in fleet.body, "locked_assignments field present")
+        lids = [a["load_id"] for a in (fleet.body.get("assignments") or [])]
+        ok(len(lids) == len(set(lids)), "fleet no duplicate loads")
+    hun = call("POST", "/api/fleet/optimize/?solver=hungarian", token=token)
+    ok(hun.status == 200 and isinstance(hun.body, dict) and hun.body.get("solver") == "hungarian", "hungarian path")
 
     an = call("GET", "/api/analytics/summary/", token=token)
     ok(an.status == 200, "analytics")

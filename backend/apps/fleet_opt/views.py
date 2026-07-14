@@ -2,7 +2,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.fleet.models import Truck
-from apps.fleet_opt.engine import optimize_fleet
+from apps.fleet_opt.engine import run_optimize
+from apps.fleet_opt.locks import locked_pairs_for_carrier
 from apps.loads.models import Load
 from apps.scoring.engine import LoadInput, TruckInput
 from integrations.eia import get_diesel_usd_per_gal
@@ -10,6 +11,11 @@ from integrations.eia import get_diesel_usd_per_gal
 
 class FleetOptimizeView(APIView):
     def post(self, request):
+        solver = (
+            request.query_params.get("solver")
+            or (request.data.get("solver") if isinstance(request.data, dict) else None)
+            or "mip"
+        )
         qs = (
             Truck.objects.filter(carrier__owner=request.user)
             .select_related("driver", "carrier")
@@ -48,13 +54,29 @@ class FleetOptimizeView(APIView):
             for l in Load.objects.all().order_by("id")
         ]
         diesel = get_diesel_usd_per_gal()
-        pairs = optimize_fleet(trucks_in, loads, diesel)
+        locked = locked_pairs_for_carrier(request.user)
+        result = run_optimize(
+            trucks_in,
+            loads,
+            diesel,
+            solver=str(solver),
+            locked_pairs=locked,
+        )
         return Response(
             {
                 "diesel_usd_per_gal": diesel,
+                "solver": result.solver,
+                "objective_value": result.objective_value,
                 "assignments": [
-                    {"truck_id": p.truck_id, "load_id": p.load_id, "score": p.score}
-                    for p in pairs
+                    {
+                        "truck_id": p.truck_id,
+                        "load_id": p.load_id,
+                        "score": p.score,
+                    }
+                    for p in result.assignments
                 ],
+                "constraints_summary": result.constraints_summary,
+                "baseline_comparison": result.baseline_comparison,
+                "locked_assignments": result.locked_assignments,
             }
         )
